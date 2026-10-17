@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Team: {{ team.name }}{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.375rem;">
+      <a href="{% url 'team_list' %}">Teams</a> &rsaquo;
+      <span>{{ team.name }}</span>
+    </div>
+    <h2 style="font-size: 1.625rem; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem;">
+      {{ team.name }}
+      <span class="badge badge-role-{{ user_role|lower }}">Your Role: {{ user_role }}</span>
+    </h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; max-width: 600px;">
+      {{ team.description|default:"No description provided." }}
+    </p>
+  </div>
+
+  <div style="display: flex; gap: 0.5rem; align-items: center;">
+    {% if is_admin %}
+    <a href="{% url 'team_edit' pk=team.pk %}" class="btn btn-secondary btn-sm">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+      Edit Settings
+    </a>
+    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('add-member-modal')">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+      Add Member
+    </button>
+    {% endif %}
+    <a href="{% url 'task_create' %}?team={{ team.id }}" class="btn btn-secondary btn-sm">+ New Team Task</a>
+  </div>
+</div>
+
+<!-- Team Statistics Bar -->
+<div class="kpi-grid" style="margin-bottom: 2rem;">
+  <div class="kpi-card kpi-primary">
+    <span class="kpi-label">Team Members</span>
+    <span class="kpi-value">{{ team.member_count }}</span>
+    <span class="kpi-subtitle">Active team collaborators</span>
+  </div>
+  <div class="kpi-card kpi-open">
+    <span class="kpi-label">Active Tasks</span>
+    <span class="kpi-value">{{ team.active_tasks_count }}</span>
+    <span class="kpi-subtitle"><a href="{% url 'task_list' %}?team={{ team.id }}">View team tasks &rarr;</a></span>
+  </div>
+  <div class="kpi-card kpi-overdue">
+    <span class="kpi-label">Overdue</span>
+    <span class="kpi-value" style="color: var(--urgent);">{{ team.overdue_tasks_count }}</span>
+    <span class="kpi-subtitle">
+      {% if team.overdue_tasks_count > 0 %}
+      <a href="{% url 'task_list' %}?team={{ team.id }}&overdue=1" style="color: var(--urgent); font-weight: 600;">View overdue &rarr;</a>
+      {% else %}
+      None
+      {% endif %}
+    </span>
+  </div>
+</div>
+
+<!-- Two Columns: Members Management + Team Tasks -->
+<div style="display: grid; grid-template-columns: 3fr 2fr; gap: 1.5rem; align-items: start;">
+  <!-- Members Management -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Team Roster & Memberships ({{ memberships.count }})</h3>
+      {% if is_admin %}
+      <button type="button" class="btn btn-sm btn-primary" onclick="openModal('add-member-modal')">+ Add</button>
+      {% endif %}
+    </div>
+
+    <div class="table-container" style="border: none;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Joined</th>
+            {% if is_admin %}<th style="text-align: right;">Role Management</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in memberships %}
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 0.625rem;">
+                <div class="user-avatar" style="width: 28px; height: 28px; font-size: 0.75rem;">
+                  {{ m.user.username|slice:":2"|upper }}
+                </div>
+                <div>
+                  <div style="font-weight: 600;">{{ m.user.get_full_name|default:m.user.username }}</div>
+                  <div style="font-size: 0.6875rem; color: var(--text-muted);">@{{ m.user.username }}</div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span class="badge badge-role-{{ m.role|lower }}">
+                {{ m.get_role_display }}
+              </span>
+            </td>
+            <td style="color: var(--text-muted); font-size: 0.8125rem;">
+              {{ m.created_at|date:"M d, Y" }}
+            </td>
+            {% if is_admin %}
+            <td style="text-align: right;">
+              <div style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                <!-- Change Role Form -->
+                <form method="post" action="{% url 'team_change_role' pk=team.pk membership_id=m.pk %}" style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                  {% csrf_token %}
+                  <select name="role" class="form-select" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; width: auto;" onchange="this.form.submit()">
+                    {% for r_val, r_lbl in role_choices %}
+                    <option value="{{ r_val }}" {% if m.role == r_val %}selected{% endif %}>{{ r_lbl }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+
+                <!-- Remove Member Form -->
+                <form method="post" action="{% url 'team_remove_member' pk=team.pk membership_id=m.pk %}" style="display: inline;" onsubmit="return confirm('Remove {{ m.user.username }} from {{ team.name }}?');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-danger" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Remove Member">&times;</button>
+                </form>
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Active Team Tasks Box -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Recent Active Tasks</h3>
+      <a href="{% url 'task_list' %}?team={{ team.id }}" class="btn btn-sm btn-secondary">All Tasks &rarr;</a>
+    </div>
+
+    {% if tasks %}
+    <div style="display: flex; flex-direction: column; gap: 0.625rem;">
+      {% for task in tasks %}
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.625rem 0.75rem; background-color: var(--bg-subtle); border-radius: var(--radius-md);">
+        <div>
+          <a href="{% url 'task_detail' pk=task.id %}" style="font-weight: 600; font-size: 0.875rem;">#{{ task.id }} {{ task.title }}</a>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.125rem;">
+            Assignee: {{ task.assignee.username|default:"Unassigned" }}
+          </div>
+        </div>
+        <span class="badge badge-{{ task.status|lower }}">{{ task.get_status_display }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 1.5rem;">
+      <p class="empty-state-description">No active tasks in this team yet.</p>
+      <a href="{% url 'task_create' %}?team={{ team.id }}" class="btn btn-sm btn-primary">Create First Task</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Add Member Modal -->
+{% if is_admin %}
+<div class="modal-overlay" id="add-member-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3 style="font-size: 1rem; font-weight: 700;">Add Member to {{ team.name }}</h3>
+      <button type="button" class="alert-close" onclick="closeModal('add-member-modal')">&times;</button>
+    </div>
+    <form method="post" action="{% url 'team_add_member' pk=team.pk %}" novalidate>
+      {% csrf_token %}
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="add-member-input">Username or Registered Email *</label>
+          {{ add_member_form.username_or_email }}
+          <div class="form-help">Enter the exact username or email of the registered user.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="add-member-role">Team Role</label>
+          {{ add_member_form.role }}
+          <div class="form-help">Admin (full manage), Manager (assign & edit), or Member.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('add-member-modal')">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Add to Team</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

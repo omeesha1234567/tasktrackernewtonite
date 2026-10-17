@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Edit Task #{{ task.id }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 760px; margin: 0 auto;">
+  <div style="margin-bottom: 1.5rem;">
+    <a href="{% url 'task_detail' pk=task.pk %}" style="font-size: 0.8125rem; color: var(--text-muted);">&larr; Back to Task #{{ task.id }}</a>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-top: 0.25rem;">Edit Task #{{ task.id }}</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Modify task details. Optimistic locking will verify no concurrent changes have occurred.</p>
+  </div>
+
+  {% if conflict_error %}
+  <!-- Optimistic Concurrency Stale Update Conflict Alert -->
+  <div class="conflict-alert" id="stale-update-conflict">
+    <div class="conflict-alert-title">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      Concurrency Conflict Detected (Stale Update)
+    </div>
+    <p style="font-size: 0.875rem; color: #9a3412;">
+      {{ conflict_error }}
+    </p>
+
+    {% if current_task %}
+    <div class="conflict-diff">
+      <div>
+        <strong style="color: #065f46; display: block; margin-bottom: 0.25rem;">Current In Database (v{{ current_task.version }}):</strong>
+        <div><strong>Title:</strong> {{ current_task.title }}</div>
+        <div><strong>Status:</strong> {{ current_task.get_status_display }}</div>
+        <div><strong>Priority:</strong> {{ current_task.get_priority_display }}</div>
+        <div><strong>Assignee:</strong> {{ current_task.assignee.username|default:"Unassigned" }}</div>
+        <div><strong>Due Date:</strong> {{ current_task.due_date|default:"None" }}</div>
+      </div>
+      <div>
+        <strong style="color: #991b1b; display: block; margin-bottom: 0.25rem;">Your Submitted Changes:</strong>
+        <div>Review below and submit again if you wish to overwrite with your latest edits.</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="post" action="{% url 'task_edit' pk=task.pk %}" novalidate id="task-edit-form">
+      {% csrf_token %}
+      {{ form.version }}
+
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger" style="margin-bottom: 1.25rem;">
+        {% for error in form.non_field_errors %}
+        <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="form-group">
+        <label class="form-label" for="id_title">Task Title *</label>
+        {{ form.title }}
+        {% if form.title.errors %}
+        <div class="form-error">{{ form.title.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="id_description">Description</label>
+        {{ form.description }}
+        {% if form.description.errors %}
+        <div class="form-error">{{ form.description.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="id_status">Status (Workflow Governed)</label>
+          {{ form.status }}
+          {% if form.status.errors %}
+          <div class="form-error">{{ form.status.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="id_priority">Priority</label>
+          {{ form.priority }}
+          {% if form.priority.errors %}
+          <div class="form-error">{{ form.priority.errors.0 }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="id_assignee">Assignee (Team: {{ task.team.name }})</label>
+          {{ form.assignee }}
+          {% if form.assignee.errors %}
+          <div class="form-error">{{ form.assignee.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="id_due_date">Due Date</label>
+          {{ form.due_date }}
+          {% if form.due_date.errors %}
+          <div class="form-error">{{ form.due_date.errors.0 }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+        <span style="font-size: 0.75rem; color: var(--text-subtle);">
+          Tracking optimistic version: <strong>{{ form.version.value }}</strong>
+        </span>
+        <div style="display: flex; gap: 0.75rem;">
+          <a href="{% url 'task_detail' pk=task.pk %}" class="btn btn-secondary">Cancel</a>
+          <button type="submit" class="btn btn-primary" id="btn-save-task">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

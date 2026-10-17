@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block page_title %}403 - Permission Denied{% endblock %}
+
+{% block content %}
+<div class="empty-state card" style="max-width: 600px; margin: 3rem auto; padding: 3rem 2rem;">
+  <div style="font-size: 3rem; margin-bottom: 1rem;">🛡️</div>
+  <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">403: Access Restricted</h2>
+  <p style="color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; line-height: 1.5;">
+    You do not possess the required team permissions or membership role to access this resource.
+  </p>
+  <div style="display: flex; justify-content: center; gap: 0.75rem;">
+    <a href="{% url 'dashboard' %}" class="btn btn-primary">Return to Dashboard</a>
+    <a href="{% url 'team_list' %}" class="btn btn-secondary">View Your Teams</a>
+  </div>
+</div>
+{% endblock %}

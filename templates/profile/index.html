@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Account Profile{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem;">
+  <div>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">User Profile & Team Memberships</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Account identity, active team memberships, and assigned work summary.</p>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem;">
+      <div class="user-avatar" style="width: 56px; height: 56px; font-size: 1.25rem;">
+        {{ user.username|slice:":2"|upper }}
+      </div>
+      <div>
+        <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);">
+          {{ user.get_full_name|default:user.username }}
+        </h3>
+        <div style="color: var(--text-muted); font-size: 0.875rem;">@{{ user.username }} &bull; {{ user.email }}</div>
+        {% if user.is_superuser %}
+        <span class="badge badge-role-admin" style="margin-top: 0.35rem;">System Superuser</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; border-top: 1px solid var(--border-subtle); padding-top: 1.25rem;">
+      <div>
+        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">ACTIVE ASSIGNED TASKS</span>
+        <div style="font-size: 1.25rem; font-weight: 700; color: var(--primary); margin-top: 0.25rem;">
+          {{ assigned_tasks_count }}
+        </div>
+      </div>
+      <div>
+        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">DATE JOINED</span>
+        <div style="font-size: 0.9375rem; font-weight: 600; color: var(--text-main); margin-top: 0.25rem;">
+          {{ user.date_joined|date:"F d, Y" }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Your Workspace Memberships ({{ memberships.count }})</h3>
+      <a href="{% url 'team_create' %}" class="btn btn-sm btn-primary">+ Create New Team</a>
+    </div>
+
+    {% if memberships %}
+    <div class="table-container" style="border: none;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Team Workspace</th>
+            <th>Role</th>
+            <th>Active Tasks</th>
+            <th style="text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in memberships %}
+          <tr>
+            <td style="font-weight: 600;">
+              <a href="{% url 'team_detail' pk=m.team.id %}">{{ m.team.name }}</a>
+            </td>
+            <td>
+              <span class="badge badge-role-{{ m.role|lower }}">{{ m.get_role_display }}</span>
+            </td>
+            <td>{{ m.team.active_tasks_count }}</td>
+            <td style="text-align: right;">
+              <a href="{% url 'team_detail' pk=m.team.id %}" class="btn btn-sm btn-secondary">Open Workspace &rarr;</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 1.5rem;">
+      <p class="empty-state-description">You are not a member of any workspace yet.</p>
+      <a href="{% url 'team_create' %}" class="btn btn-primary btn-sm">Create Workspace</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Teams{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">Your Teams & Workspaces</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Collaborate with cross-functional team members and govern RBAC permissions.</p>
+  </div>
+  <a href="{% url 'team_create' %}" class="btn btn-primary" id="btn-create-team-main">
+    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    Create New Team
+  </a>
+</div>
+
+{% if teams_data %}
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem;">
+  {% for item in teams_data %}
+  <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+        <h3 style="font-size: 1.125rem; font-weight: 700; color: var(--text-main);">
+          <a href="{% url 'team_detail' pk=item.team.id %}">{{ item.team.name }}</a>
+        </h3>
+        <span class="badge badge-role-{{ item.role|lower }}">{{ item.role }}</span>
+      </div>
+      <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.4;">
+        {{ item.team.description|default:"No description provided."|truncatechars:120 }}
+      </p>
+    </div>
+
+    <div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; background-color: var(--bg-subtle); padding: 0.75rem; border-radius: var(--radius-md); text-align: center; margin-bottom: 1rem;">
+        <div>
+          <span style="font-size: 0.6875rem; color: var(--text-muted); display: block; font-weight: 600;">MEMBERS</span>
+          <span style="font-size: 1.125rem; font-weight: 700;">{{ item.member_count }}</span>
+        </div>
+        <div>
+          <span style="font-size: 0.6875rem; color: var(--text-muted); display: block; font-weight: 600;">ACTIVE</span>
+          <span style="font-size: 1.125rem; font-weight: 700; color: var(--primary);">{{ item.active_tasks }}</span>
+        </div>
+        <div>
+          <span style="font-size: 0.6875rem; color: var(--text-muted); display: block; font-weight: 600;">OVERDUE</span>
+          <span style="font-size: 1.125rem; font-weight: 700; {% if item.overdue_tasks > 0 %}color: var(--urgent);{% endif %}">{{ item.overdue_tasks }}</span>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <a href="{% url 'task_list' %}?team={{ item.team.id }}" style="font-size: 0.8125rem; font-weight: 600;">View Tasks &rarr;</a>
+        <a href="{% url 'team_detail' pk=item.team.id %}" class="btn btn-sm btn-secondary">Manage Team</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state card">
+  <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+  <div class="empty-state-title">No Teams Found</div>
+  <p class="empty-state-description">You are not a member of any team yet. Create your first team workspace to start assigning and managing tasks.</p>
+  <a href="{% url 'team_create' %}" class="btn btn-primary">Create New Team</a>
+</div>
+{% endif %}
+{% endblock %}

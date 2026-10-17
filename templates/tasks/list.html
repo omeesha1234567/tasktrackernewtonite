@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">{{ title }}</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Manage, prioritize, filter, and track team tasks across workflows.</p>
+  </div>
+  <a href="{% url 'task_create' %}" class="btn btn-primary" id="btn-create-task-main">
+    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    Create New Task
+  </a>
+</div>
+
+<!-- Filters and Search Bar -->
+<form method="get" class="filter-bar" id="task-filter-form">
+  {% if my_tasks %}<input type="hidden" name="my" value="1">{% endif %}
+
+  <div class="filter-input">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by title, description or #ID..." class="form-input" id="search-input">
+  </div>
+
+  <select name="status" class="form-select filter-select" onchange="this.form.submit()">
+    <option value="">All Statuses</option>
+    {% for val, label in status_choices %}
+    <option value="{{ val }}" {% if status == val %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="priority" class="form-select filter-select" onchange="this.form.submit()">
+    <option value="">All Priorities</option>
+    {% for val, label in priority_choices %}
+    <option value="{{ val }}" {% if priority == val %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="team" class="form-select filter-select" onchange="this.form.submit()">
+    <option value="">All Teams</option>
+    {% for t in accessible_teams %}
+    <option value="{{ t.id }}" {% if team_id == t.id|stringformat:"s" %}selected{% endif %}>{{ t.name }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="sort" class="form-select filter-select" onchange="this.form.submit()">
+    <option value="-created_at" {% if sort == '-created_at' %}selected{% endif %}>Newest First</option>
+    <option value="created_at" {% if sort == 'created_at' %}selected{% endif %}>Oldest First</option>
+    <option value="due_date" {% if sort == 'due_date' %}selected{% endif %}>Due Date (Earliest)</option>
+    <option value="-due_date" {% if sort == '-due_date' %}selected{% endif %}>Due Date (Latest)</option>
+    <option value="title" {% if sort == 'title' %}selected{% endif %}>Title (A-Z)</option>
+  </select>
+
+  <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto;">
+    <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+      <input type="checkbox" name="overdue" value="1" {% if is_overdue %}checked{% endif %} onchange="this.form.submit()" class="form-checkbox">
+      Overdue Only
+    </label>
+    <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; margin-left: 0.5rem;">
+      <input type="checkbox" name="archived" value="1" {% if show_archived %}checked{% endif %} onchange="this.form.submit()" class="form-checkbox">
+      Show Archived
+    </label>
+    {% if q or status or priority or team_id or is_overdue or show_archived %}
+    <a href="{% url 'task_list' %}{% if my_tasks %}?my=1{% endif %}" class="btn btn-sm btn-secondary" style="margin-left: 0.5rem;">Clear</a>
+    {% endif %}
+  </div>
+</form>
+
+<!-- Tasks Table -->
+<div class="table-container">
+  {% if tasks %}
+  <table class="data-table" id="tasks-table">
+    <thead>
+      <tr>
+        <th style="width: 70px;">ID</th>
+        <th>Task Title</th>
+        <th>Status</th>
+        <th>Priority</th>
+        <th>Team</th>
+        <th>Assignee</th>
+        <th>Due Date</th>
+        <th style="text-align: right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr>
+        <td style="color: var(--text-muted); font-weight: 600;">#{{ task.id }}</td>
+        <td>
+          <a href="{% url 'task_detail' pk=task.pk %}" class="task-row-title">
+            {{ task.title }}
+          </a>
+          {% if task.is_archived %}
+          <span class="badge badge-archived" style="font-size: 0.6875rem; margin-left: 0.35rem;">Archived</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="badge badge-{{ task.status|lower }}">
+            <span class="badge-dot"></span>
+            {{ task.get_status_display }}
+          </span>
+        </td>
+        <td>
+          <span class="badge badge-priority-{{ task.priority|lower }}">
+            {{ task.get_priority_display }}
+          </span>
+        </td>
+        <td style="font-weight: 500;">
+          <a href="{% url 'team_detail' pk=task.team.id %}" style="color: var(--text-main);">
+            {{ task.team.name }}
+          </a>
+        </td>
+        <td>
+          {% if task.assignee %}
+          <div style="display: flex; align-items: center; gap: 0.375rem;">
+            <div class="user-avatar" style="width: 22px; height: 22px; font-size: 0.625rem;">
+              {{ task.assignee.username|slice:":2"|upper }}
+            </div>
+            <span>{{ task.assignee.username }}</span>
+          </div>
+          {% else %}
+          <span style="color: var(--text-subtle); font-style: italic;">Unassigned</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if task.due_date %}
+            <span style="{% if task.is_overdue %}color: var(--urgent); font-weight: 600;{% endif %}">
+              {{ task.due_date|date:"M d, Y" }}
+              {% if task.is_overdue %}<span title="Overdue">⚠️</span>{% endif %}
+            </span>
+          {% else %}
+            <span style="color: var(--text-subtle);">&mdash;</span>
+          {% endif %}
+        </td>
+        <td style="text-align: right;">
+          <a href="{% url 'task_detail' pk=task.pk %}" class="btn btn-sm btn-secondary">View &rarr;</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Pagination -->
+  {% if page_obj.has_other_pages %}
+  <div class="pagination">
+    <span style="font-size: 0.8125rem; color: var(--text-muted);">
+      Showing page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} ({{ page_obj.paginator.count }} total tasks)
+    </span>
+    <div class="pagination-links">
+      {% if page_obj.has_previous %}
+      <a href="?page={{ page_obj.previous_page_number }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if priority %}&priority={{ priority }}{% endif %}{% if team_id %}&team={{ team_id }}{% endif %}{% if is_overdue %}&overdue=1{% endif %}{% if show_archived %}&archived=1{% endif %}{% if sort %}&sort={{ sort }}{% endif %}{% if my_tasks %}&my=1{% endif %}" class="page-btn">&larr; Prev</a>
+      {% endif %}
+
+      <span class="page-btn active">{{ page_obj.number }}</span>
+
+      {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if priority %}&priority={{ priority }}{% endif %}{% if team_id %}&team={{ team_id }}{% endif %}{% if is_overdue %}&overdue=1{% endif %}{% if show_archived %}&archived=1{% endif %}{% if sort %}&sort={{ sort }}{% endif %}{% if my_tasks %}&my=1{% endif %}" class="page-btn">Next &rarr;</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="empty-state">
+    <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+    <div class="empty-state-title">No tasks found</div>
+    <p class="empty-state-description">No tasks match your active filters or search criteria. Try modifying your filters or create a new task.</p>
+    <a href="{% url 'task_create' %}" class="btn btn-primary">Create First Task</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

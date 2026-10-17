@@ -1,0 +1,211 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Task #{{ task.id }}{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb Header -->
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.375rem;">
+      <a href="{% url 'task_list' %}">Tasks</a> &rsaquo;
+      <a href="{% url 'team_detail' pk=task.team.id %}">{{ task.team.name }}</a> &rsaquo;
+      <span>Task #{{ task.id }}</span>
+    </div>
+    <h2 style="font-size: 1.625rem; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem;">
+      {{ task.title }}
+      {% if task.is_archived %}
+      <span class="badge badge-archived">Archived</span>
+      {% endif %}
+    </h2>
+  </div>
+
+  <div style="display: flex; gap: 0.5rem; align-items: center;">
+    {% if can_edit and not task.is_archived %}
+    <a href="{% url 'task_edit' pk=task.pk %}" class="btn btn-secondary" id="btn-edit-task">
+      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+      Edit Task
+    </a>
+    {% endif %}
+
+    {% if can_archive %}
+      {% if not task.is_archived %}
+      <button type="button" class="btn btn-danger btn-sm" onclick="openModal('archive-modal')">Archive</button>
+      {% else %}
+      <form method="post" action="{% url 'task_restore' pk=task.pk %}" style="display: inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary btn-sm">Restore to Active</button>
+      </form>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+<!-- Main Grid: Task Details & Activity Stream -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
+  <!-- Left Column: Details, Description, Workflow Transitions -->
+  <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+    <!-- Core Information Card -->
+    <div class="card">
+      <div style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem;">
+        <span class="badge badge-{{ task.status|lower }}" style="font-size: 0.8125rem; padding: 0.3rem 0.75rem;">
+          <span class="badge-dot"></span>
+          {{ task.get_status_display }}
+        </span>
+        <span class="badge badge-priority-{{ task.priority|lower }}" style="font-size: 0.8125rem; padding: 0.3rem 0.75rem;">
+          Priority: {{ task.get_priority_display }}
+        </span>
+        <span class="badge" style="background-color: #f1f5f9; color: var(--text-muted); font-family: monospace;" title="Optimistic concurrency control version">
+          v{{ task.version }}
+        </span>
+      </div>
+
+      <h3 style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; margin-bottom: 0.5rem;">
+        Description
+      </h3>
+      <div style="font-size: 0.9375rem; line-height: 1.6; color: var(--text-main); white-space: pre-wrap; background-color: var(--bg-subtle); padding: 1.25rem; border-radius: var(--radius-md); min-height: 80px;">
+        {% if task.description %}{{ task.description }}{% else %}<span style="color: var(--text-subtle); font-style: italic;">No description provided.</span>{% endif %}
+      </div>
+
+      <!-- Quick Workflow Transitions -->
+      {% if can_change_status and not task.is_archived and allowed_transitions %}
+      <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+        <span style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.625rem;">
+          Workflow Status Transitions (Atomic & Concurrency-Protected):
+        </span>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          {% for t in allowed_transitions %}
+          <form method="post" action="{% url 'task_transition' pk=task.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="status" value="{{ t.status }}">
+            <input type="hidden" name="version" value="{{ task.version }}">
+            <button type="submit" class="btn btn-sm {% if t.status == 'RESOLVED' %}btn-success{% else %}btn-secondary{% endif %}">
+              Transition to {{ t.label }} &rarr;
+            </button>
+          </form>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Activity Audit History -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Audit & Activity Timeline</h3>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">Immutable change log</span>
+      </div>
+
+      {% if activity_timeline %}
+      <div class="timeline">
+        {% for event in activity_timeline %}
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-header">
+            <span class="timeline-actor">{{ event.actor.username|default:"System" }}</span>
+            <span class="badge badge-role-member" style="font-size: 0.6875rem;">{{ event.get_event_type_display }}</span>
+            <span class="timeline-time">{{ event.created_at|date:"M d, Y H:i" }}</span>
+          </div>
+          <div class="timeline-content">
+            {{ event.details }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state" style="padding: 1.5rem;">
+        <p class="empty-state-description">No activity events recorded yet.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right Column: Meta Attributes & Permissions -->
+  <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+    <!-- Meta Panel -->
+    <div class="card">
+      <h3 class="card-title" style="margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+        Task Metadata
+      </h3>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem; font-size: 0.875rem;">
+        <div>
+          <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">TEAM</span>
+          <a href="{% url 'team_detail' pk=task.team.id %}" style="font-weight: 600;">{{ task.team.name }}</a>
+          <span class="badge badge-role-{{ user_team_role|lower }}" style="margin-left: 0.35rem;">Your Role: {{ user_team_role }}</span>
+        </div>
+
+        <div>
+          <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">ASSIGNEE</span>
+          {% if task.assignee %}
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+            <div class="user-avatar" style="width: 26px; height: 26px; font-size: 0.6875rem;">{{ task.assignee.username|slice:":2"|upper }}</div>
+            <span style="font-weight: 600;">{{ task.assignee.get_full_name|default:task.assignee.username }} (@{{ task.assignee.username }})</span>
+          </div>
+          {% else %}
+          <span style="color: var(--text-subtle); font-style: italic;">Unassigned</span>
+          {% endif %}
+        </div>
+
+        <div>
+          <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">CREATOR</span>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+            <div class="user-avatar" style="width: 26px; height: 26px; font-size: 0.6875rem; background-color: var(--text-muted);">{{ task.creator.username|slice:":2"|upper }}</div>
+            <span>{{ task.creator.get_full_name|default:task.creator.username }}</span>
+          </div>
+        </div>
+
+        <div>
+          <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">DEADLINE / DUE DATE</span>
+          {% if task.due_date %}
+            <span style="font-weight: 600; {% if task.is_overdue %}color: var(--urgent);{% endif %}">
+              {{ task.due_date|date:"F d, Y" }}
+              {% if task.is_overdue %}<span class="badge badge-priority-urgent" style="margin-left: 0.35rem;">Overdue</span>{% endif %}
+            </span>
+          {% else %}
+            <span style="color: var(--text-subtle);">None set</span>
+          {% endif %}
+        </div>
+
+        <div>
+          <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">OPTIMISTIC LOCK VERSION</span>
+          <span style="font-family: monospace; font-weight: 700; color: var(--primary);">Version {{ task.version }}</span>
+          <div style="font-size: 0.6875rem; color: var(--text-subtle); margin-top: 0.125rem;">Guarantees lost-update prevention under concurrent edits.</div>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-subtle); padding-top: 0.75rem; font-size: 0.75rem; color: var(--text-subtle); display: flex; flex-direction: column; gap: 0.25rem;">
+          <div>Created: {{ task.created_at|date:"M d, Y H:i" }}</div>
+          <div>Last Updated: {{ task.updated_at|date:"M d, Y H:i" }}</div>
+          {% if task.archived_at %}
+          <div>Archived at: {{ task.archived_at|date:"M d, Y H:i" }}</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Archive Confirmation Modal -->
+<div class="modal-overlay" id="archive-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3 style="font-size: 1rem; font-weight: 700; color: var(--text-main);">Confirm Archive Task</h3>
+      <button type="button" class="alert-close" onclick="closeModal('archive-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 0.875rem; color: var(--text-muted);">
+        Are you sure you want to archive <strong>Task #{{ task.id }} ({{ task.title }})</strong>?
+      </p>
+      <p style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.5rem;">
+        Archiving removes this task from active boards and dashboards while safely preserving all history, activity logs, and comments.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('archive-modal')">Cancel</button>
+      <form method="post" action="{% url 'task_archive' pk=task.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger btn-sm">Yes, Archive Task</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

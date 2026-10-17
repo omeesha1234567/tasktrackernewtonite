@@ -1,0 +1,350 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">Workspace Overview</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Real-time task tracking, team workload, and workflow health metrics.</p>
+  </div>
+  
+  <form method="get" action="{% url 'dashboard' %}" style="display: flex; align-items: center; gap: 0.5rem;">
+    <label for="dashboard-team-filter" style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);">Team Filter:</label>
+    <select name="team" id="dashboard-team-filter" class="form-select" style="width: auto; padding: 0.4rem 0.75rem;" onchange="this.form.submit()">
+      <option value="">All My Teams</option>
+      {% for team in accessible_teams %}
+      <option value="{{ team.id }}" {% if selected_team and selected_team.id == team.id %}selected{% endif %}>
+        {{ team.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+  <div class="kpi-card kpi-primary">
+    <span class="kpi-label">Active Tasks</span>
+    <span class="kpi-value">{{ total_active }}</span>
+    <span class="kpi-subtitle">Non-archived across workspace</span>
+  </div>
+
+  <div class="kpi-card kpi-open">
+    <span class="kpi-label">Open</span>
+    <span class="kpi-value" style="color: #2563eb;">{{ open_count }}</span>
+    <span class="kpi-subtitle"><a href="{% url 'task_list' %}?status=OPEN{% if selected_team %}&team={{ selected_team.id }}{% endif %}">View Open &rarr;</a></span>
+  </div>
+
+  <div class="kpi-card kpi-progress">
+    <span class="kpi-label">In Progress</span>
+    <span class="kpi-value" style="color: #d97706;">{{ in_progress_count }}</span>
+    <span class="kpi-subtitle"><a href="{% url 'task_list' %}?status=IN_PROGRESS{% if selected_team %}&team={{ selected_team.id }}{% endif %}">View In Progress &rarr;</a></span>
+  </div>
+
+  <div class="kpi-card kpi-resolved">
+    <span class="kpi-label">Resolved</span>
+    <span class="kpi-value" style="color: #059669;">{{ resolved_count }}</span>
+    <span class="kpi-subtitle"><a href="{% url 'task_list' %}?status=RESOLVED{% if selected_team %}&team={{ selected_team.id }}{% endif %}">View Resolved &rarr;</a></span>
+  </div>
+
+  <div class="kpi-card kpi-overdue">
+    <span class="kpi-label">Overdue</span>
+    <span class="kpi-value" style="color: #dc2626;">{{ overdue_count }}</span>
+    <span class="kpi-subtitle">
+      {% if overdue_count > 0 %}
+      <a href="{% url 'task_list' %}?overdue=1{% if selected_team %}&team={{ selected_team.id }}{% endif %}" style="color: #dc2626; font-weight: 600;">Requires attention &rarr;</a>
+      {% else %}
+      All deadlines on track
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="kpi-card" style="border-left: 3px solid var(--primary);">
+    <span class="kpi-label">Assigned To Me</span>
+    <span class="kpi-value">{{ my_tasks_count }}</span>
+    <span class="kpi-subtitle"><a href="{% url 'task_list' %}?my=1">Open tasks for you &rarr;</a></span>
+  </div>
+</div>
+
+<!-- Interactive Charts Grid -->
+<div class="charts-grid">
+  <!-- Status Distribution -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">Task Status Breakdown</h3>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">Current Active</span>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="statusChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Priority Distribution -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">Priority Breakdown</h3>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">Active by Urgency</span>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="priorityChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="charts-grid">
+  <!-- Activity Trend (Created vs Resolved over 7 days) -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">Velocity & Activity Trend (Last 7 Days)</h3>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">Created vs Resolved</span>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="activityTrendChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Team Workload -->
+  <div class="card chart-card">
+    <div class="card-header">
+      <h3 class="card-title">Team Workload (Tasks by Assignee)</h3>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">Unresolved Tasks</span>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="workloadChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Two-column section: Overdue Tasks + Recent Activity -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+  <!-- Overdue Tasks Box -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+        <span style="color: var(--danger);">●</span> Overdue Tasks Requiring Action
+      </h3>
+      {% if overdue_count > 0 %}
+      <a href="{% url 'task_list' %}?overdue=1{% if selected_team %}&team={{ selected_team.id }}{% endif %}" class="btn btn-sm btn-secondary">View All ({{ overdue_count }})</a>
+      {% endif %}
+    </div>
+
+    {% if overdue_tasks %}
+    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+      {% for task in overdue_tasks %}
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background-color: var(--danger-light); border: 1px solid var(--danger-border); border-radius: var(--radius-md);">
+        <div>
+          <a href="{% url 'task_detail' pk=task.pk %}" style="font-weight: 600; color: var(--text-main);">#{{ task.id }} {{ task.title }}</a>
+          <div style="font-size: 0.75rem; color: var(--danger-text); margin-top: 0.25rem;">
+            Due {{ task.due_date|date:"M d, Y" }} &bull; {{ task.team.name }} &bull; Assignee: {{ task.assignee.username|default:"Unassigned" }}
+          </div>
+        </div>
+        <span class="badge badge-priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 2rem 1rem;">
+      <div style="font-size: 1.5rem; margin-bottom: 0.5rem; color: var(--success);">✓</div>
+      <div class="empty-state-title" style="font-size: 0.9375rem;">No Overdue Tasks</div>
+      <p class="empty-state-description" style="font-size: 0.8125rem;">All tasks with set deadlines are currently on schedule or resolved.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Recent Activity Stream -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Recent Workspace Activity</h3>
+      <a href="{% url 'activity_list' %}{% if selected_team %}?team={{ selected_team.id }}{% endif %}" class="btn btn-sm btn-secondary">Full Audit Trail &rarr;</a>
+    </div>
+
+    {% if recent_activity %}
+    <div class="timeline" style="padding-left: 1.25rem;">
+      {% for event in recent_activity %}
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-header">
+          <span class="timeline-actor">{{ event.actor.username|default:"System" }}</span>
+          <span class="badge badge-role-member" style="font-size: 0.6875rem;">{{ event.team.name }}</span>
+          <span class="timeline-time">{{ event.created_at|timesince }} ago</span>
+        </div>
+        <div class="timeline-content">
+          {{ event.details }}
+          {% if event.task %}
+          <div style="margin-top: 0.25rem;">
+            <a href="{% url 'task_detail' pk=event.task.id %}" style="font-size: 0.75rem; font-weight: 600;">View Task #{{ event.task.id }} &rarr;</a>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 2rem 1rem;">
+      <div class="empty-state-title" style="font-size: 0.9375rem;">No Activity Recorded Yet</div>
+      <p class="empty-state-description" style="font-size: 0.8125rem;">Activity events will be tracked automatically as tasks and memberships evolve.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // 1. Status Chart
+  const statusCtx = document.getElementById('statusChart');
+  if (statusCtx) {
+    const statusData = {{ status_chart_data|safe }};
+    const total = statusData.data.reduce((a, b) => a + b, 0);
+
+    new Chart(statusCtx, {
+      type: 'doughnut',
+      data: {
+        labels: statusData.labels,
+        datasets: [{
+          data: total > 0 ? statusData.data : [1],
+          backgroundColor: total > 0 ? statusData.colors : ['#e2e8f0'],
+          borderWidth: 2,
+          borderColor: '#ffffff',
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { family: 'Inter', size: 12 } } },
+          tooltip: {
+            enabled: total > 0,
+            callbacks: {
+              label: function(context) {
+                return ` ${context.label}: ${context.raw} tasks`;
+              }
+            }
+          }
+        },
+        onClick: (evt, elements) => {
+          if (elements.length > 0 && total > 0) {
+            const index = elements[0].index;
+            const statusKey = ['OPEN', 'IN_PROGRESS', 'RESOLVED'][index];
+            window.location.href = `{% url 'task_list' %}?status=${statusKey}{% if selected_team %}&team={{ selected_team.id }}{% endif %}`;
+          }
+        }
+      }
+    });
+  }
+
+  // 2. Priority Chart
+  const prioCtx = document.getElementById('priorityChart');
+  if (prioCtx) {
+    const prioData = {{ priority_chart_data|safe }};
+    new Chart(prioCtx, {
+      type: 'bar',
+      data: {
+        labels: prioData.labels,
+        datasets: [{
+          label: 'Active Tasks',
+          data: prioData.data,
+          backgroundColor: prioData.colors,
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
+          x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+        },
+        plugins: {
+          legend: { display: false }
+        },
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const index = elements[0].index;
+            const prioKey = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'][index];
+            window.location.href = `{% url 'task_list' %}?priority=${prioKey}{% if selected_team %}&team={{ selected_team.id }}{% endif %}`;
+          }
+        }
+      }
+    });
+  }
+
+  // 3. Activity Trend Chart
+  const trendCtx = document.getElementById('activityTrendChart');
+  if (trendCtx) {
+    const trendData = {{ activity_trend_data|safe }};
+    new Chart(trendCtx, {
+      type: 'line',
+      data: {
+        labels: trendData.labels,
+        datasets: [
+          {
+            label: 'Tasks Created',
+            data: trendData.created,
+            borderColor: '#4f46e5',
+            backgroundColor: 'rgba(79, 70, 229, 0.08)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 3,
+          },
+          {
+            label: 'Tasks Resolved',
+            data: trendData.resolved,
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 3,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
+          x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+        },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { family: 'Inter' } } }
+        }
+      }
+    });
+  }
+
+  // 4. Team Workload Chart
+  const workloadCtx = document.getElementById('workloadChart');
+  if (workloadCtx) {
+    const workloadData = {{ workload_chart_data|safe }};
+    new Chart(workloadCtx, {
+      type: 'bar',
+      data: {
+        labels: workloadData.labels.length > 0 ? workloadData.labels : ['No assigned tasks'],
+        datasets: [{
+          label: 'Unresolved Tasks',
+          data: workloadData.data.length > 0 ? workloadData.data : [0],
+          backgroundColor: '#6366f1',
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        scales: {
+          x: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
+          y: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  }
+});
+</script>
+{% endblock %}

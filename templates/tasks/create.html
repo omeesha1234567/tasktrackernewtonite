@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Create Task{% endblock %}
+
+{% block content %}
+<div style="max-width: 720px; margin: 0 auto;">
+  <div style="margin-bottom: 1.5rem;">
+    <a href="{% url 'task_list' %}" style="font-size: 0.8125rem; color: var(--text-muted);">&larr; Back to Tasks</a>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-top: 0.25rem;">Create New Task</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem;">Define a work item, assign team members, and set target milestones.</p>
+  </div>
+
+  <div class="card">
+    <form method="post" action="{% url 'task_create' %}" novalidate id="task-create-form">
+      {% csrf_token %}
+      {{ form.idempotency_key }}
+
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger" style="margin-bottom: 1.25rem;">
+        {% for error in form.non_field_errors %}
+        <div>{{ error }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="form-group">
+        <label class="form-label" for="id_title">Task Title *</label>
+        {{ form.title }}
+        {% if form.title.errors %}
+        <div class="form-error">{{ form.title.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="id_description">Description & Acceptance Criteria</label>
+        {{ form.description }}
+        {% if form.description.errors %}
+        <div class="form-error">{{ form.description.errors.0 }}</div>
+        {% endif %}
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="task-team-select">Team Workspace *</label>
+          {{ form.team }}
+          {% if form.team.errors %}
+          <div class="form-error">{{ form.team.errors.0 }}</div>
+          {% endif %}
+          <div class="form-help">Only teams where you have active membership.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="task-assignee-select">Assignee</label>
+          {{ form.assignee }}
+          {% if form.assignee.errors %}
+          <div class="form-error">{{ form.assignee.errors.0 }}</div>
+          {% endif %}
+          <div class="form-help">Must belong to the selected team.</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem;">
+        <div class="form-group">
+          <label class="form-label" for="id_priority">Priority</label>
+          {{ form.priority }}
+          {% if form.priority.errors %}
+          <div class="form-error">{{ form.priority.errors.0 }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="id_status">Initial Status</label>
+          {{ form.status }}
+          {% if form.status.errors %}
+          <div class="form-error">{{ form.status.errors.0 }}</div>
+          {% endif %}
+          <div class="form-help">Cannot start in Resolved.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="id_due_date">Due Date</label>
+          {{ form.due_date }}
+          {% if form.due_date.errors %}
+          <div class="form-error">{{ form.due_date.errors.0 }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+        <a href="{% url 'task_list' %}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="btn-submit-create-task">
+          Create Task
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

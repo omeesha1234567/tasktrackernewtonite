@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block page_title %}404 - Not Found{% endblock %}
+
+{% block content %}
+<div class="empty-state card" style="max-width: 600px; margin: 3rem auto; padding: 3rem 2rem;">
+  <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+  <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">404: Resource Not Found</h2>
+  <p style="color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; line-height: 1.5;">
+    The requested task, team, or page could not be found. It may have been archived, removed, or the link may be inaccurate.
+  </p>
+  <div style="display: flex; justify-content: center; gap: 0.75rem;">
+    <a href="{% url 'dashboard' %}" class="btn btn-primary">Go to Dashboard</a>
+    <a href="{% url 'task_list' %}" class="btn btn-secondary">Browse Tasks</a>
+  </div>
+</div>
+{% endblock %}

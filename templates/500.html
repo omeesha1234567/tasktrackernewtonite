@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block page_title %}500 - Server Error{% endblock %}
+
+{% block content %}
+<div class="empty-state card" style="max-width: 600px; margin: 3rem auto; padding: 3rem 2rem;">
+  <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+  <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">500: Server Processing Error</h2>
+  <p style="color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; line-height: 1.5;">
+    An unexpected error occurred while executing the transaction. Atomic rollback has prevented corrupted state.
+  </p>
+  <div style="display: flex; justify-content: center; gap: 0.75rem;">
+    <a href="{% url 'dashboard' %}" class="btn btn-primary">Return to Dashboard</a>
+  </div>
+</div>
+{% endblock %}
