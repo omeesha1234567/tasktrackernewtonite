@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Team, TeamMembership, Task, ActivityEvent, IdempotencyRecord
+from .models import (
+    Team,
+    TeamMembership,
+    Task,
+    ActivityEvent,
+    IdempotencyRecord,
+    TaskAttachment,
+    WorkspaceInvitation,
+    InAppNotification,
+)
 
 
 class TeamMembershipInline(admin.TabularInline):
@@ -44,3 +53,24 @@ class IdempotencyRecordAdmin(admin.ModelAdmin):
     list_filter = ('action',)
     search_fields = ('key', 'user__username')
     readonly_fields = ('key', 'user', 'action', 'response_code', 'task', 'created_at')
+
+
+@admin.register(TaskAttachment)
+class TaskAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('filename', 'task', 'uploader', 'file_size', 'created_at')
+    search_fields = ('filename', 'task__title', 'uploader__username')
+    readonly_fields = ('filename', 'file_size', 'content_type', 'created_at')
+
+
+@admin.register(WorkspaceInvitation)
+class WorkspaceInvitationAdmin(admin.ModelAdmin):
+    list_display = ('team', 'invitee_email', 'role', 'status', 'inviter', 'created_at', 'expires_at')
+    list_filter = ('status', 'role', 'team')
+    search_fields = ('invitee_email', 'team__name', 'inviter__username')
+
+
+@admin.register(InAppNotification)
+class InAppNotificationAdmin(admin.ModelAdmin):
+    list_display = ('title', 'recipient', 'category', 'is_read', 'is_urgent', 'created_at')
+    list_filter = ('category', 'is_read', 'is_urgent')
+    search_fields = ('title', 'message', 'recipient__username')

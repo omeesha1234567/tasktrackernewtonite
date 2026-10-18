@@ -6,9 +6,10 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError, PermissionDenied
-from django.http import JsonResponse, HttpResponseForbidden, HttpResponseNotFound
+from django.http import JsonResponse, HttpResponseForbidden, HttpResponseNotFound, FileResponse, Http404
 from django.views.decorators.http import require_POST
 from django.db.models import Q
+from django.utils import timezone
 
 from .models import (
     Team,
@@ -19,6 +20,11 @@ from .models import (
     TaskPriority,
     ActivityEvent,
     EventType,
+    TaskAttachment,
+    WorkspaceInvitation,
+    InvitationStatus,
+    InAppNotification,
+    NotificationCategory,
 )
 from .forms import (
     LoginForm,
@@ -28,6 +34,8 @@ from .forms import (
     TeamForm,
     AddTeamMemberForm,
     ChangeMemberRoleForm,
+    TaskAttachmentForm,
+    WorkspaceInvitationForm,
 )
 from .permissions import (
     can_view_team,
@@ -45,6 +53,9 @@ from .services import (
     TaskService,
     TeamService,
     DashboardService,
+    NotificationService,
+    InvitationService,
+    AttachmentService,
     StaleUpdateError,
     InvalidWorkflowTransitionError,
 )
@@ -66,10 +77,8 @@ def login_view(request):
         if user is not None:
             login(request, user)
             if not remember_me:
-                # Session expires on browser close
                 request.session.set_expiry(0)
             else:
-                # 2 weeks
                 request.session.set_expiry(1209600)
             messages.success(request, f"Welcome back, {user.first_name or user.username}!")
             next_url = request.GET.get('next') or 'dashboard'
@@ -98,7 +107,6 @@ def register_view(request):
 
         # Onboarding: automatically provision a default team for the user
         default_team_name = f"{user.username.capitalize()}'s Team"
-        # Ensure unique name
         counter = 1
         base_name = default_team_name
         while Team.objects.filter(name=default_team_name).exists():
@@ -125,8 +133,18 @@ def dashboard_view(request):
     team_id = request.GET.get('team')
     dashboard_data = DashboardService.get_dashboard_data(request.user, selected_team_id=team_id)
 
+    # Check for upcoming and overdue deadline alerts
+    NotificationService.check_and_create_deadline_alerts(request.user)
+
+    # Pending workspace invitations for current user
+    pending_invitations = WorkspaceInvitation.objects.filter(
+        Q(invitee_user=request.user) | Q(invitee_email__iexact=request.user.email),
+        status=InvitationStatus.PENDING
+    ).select_related('team', 'inviter').distinct()
+
     context = {
         'title': 'Dashboard',
+        'pending_invitations': pending_invitations,
         **dashboard_data
     }
     return render(request, 'dashboard/index.html', context)
@@ -174,12 +192,10 @@ def task_list_view(request):
             tasks_qs = tasks_qs.filter(assignee_id=assignee_id)
 
     if is_overdue:
-        from django.utils import timezone
         tasks_qs = tasks_qs.filter(
             due_date__lt=timezone.localdate()
         ).exclude(status=TaskStatus.RESOLVED)
 
-    # Allowed sorting fields
     allowed_sorts = {
         '-created_at': '-created_at',
         'created_at': 'created_at',
@@ -220,7 +236,6 @@ def task_list_view(request):
 
 @login_required
 def task_detail_view(request, pk):
-    # IDOR protection: only accessible if user belongs to team
     task = get_object_or_404(
         Task.objects.select_related('team', 'assignee', 'creator'),
         pk=pk
@@ -244,6 +259,10 @@ def task_detail_view(request, pk):
     can_archive = can_archive_task(request.user, task)
     user_team_role = get_user_team_role(request.user, task.team)
 
+    # Attachments
+    attachments = task.attachments.select_related('uploader').order_by('-created_at')
+    attachment_form = TaskAttachmentForm() if can_edit else None
+
     context = {
         'title': f"Task #{task.id}: {task.title}",
         'task': task,
@@ -253,6 +272,8 @@ def task_detail_view(request, pk):
         'can_change_status': can_change_status,
         'can_archive': can_archive,
         'user_team_role': user_team_role,
+        'attachments': attachments,
+        'attachment_form': attachment_form,
     }
     return render(request, 'tasks/detail.html', context)
 
@@ -268,7 +289,7 @@ def task_create_view(request):
     initial_team = accessible_teams.filter(pk=initial_team_id).first() if initial_team_id else accessible_teams.first()
 
     if request.method == 'POST':
-        form = TaskCreateForm(request.POST, user=request.user)
+        form = TaskCreateForm(request.POST, request.FILES, user=request.user)
         if form.is_valid():
             try:
                 task = TaskService.create_task(
@@ -282,6 +303,15 @@ def task_create_view(request):
                     due_date=form.cleaned_data.get('due_date'),
                     idempotency_key=form.cleaned_data.get('idempotency_key')
                 )
+
+                # Process any multiple uploaded files
+                uploaded_files = request.FILES.getlist('attachments')
+                for f in uploaded_files:
+                    try:
+                        AttachmentService.add_attachment(request.user, task, f)
+                    except ValidationError as ve:
+                        messages.warning(request, f"Could not attach '{f.name}': {ve}")
+
                 messages.success(request, f"Task '{task.title}' was created successfully.")
                 return redirect('task_detail', pk=task.pk)
             except ValidationError as e:
@@ -331,11 +361,8 @@ def task_edit_view(request, pk):
                 messages.success(request, f"Task '{updated_task.title}' updated successfully.")
                 return redirect('task_detail', pk=updated_task.pk)
             except StaleUpdateError as e:
-                # Concurrent edit detected!
                 conflict_error = str(e)
-                # Fetch fresh task to show diff
                 current_task = Task.objects.get(pk=task.pk)
-                # Re-initialize form version so user can re-apply if desired
                 form.initial['version'] = current_task.version
                 messages.error(request, "Concurrency Conflict: Someone else updated this task while you were editing.")
             except InvalidWorkflowTransitionError as e:
@@ -413,6 +440,60 @@ def task_restore_view(request, pk):
     return redirect('task_detail', pk=task.pk)
 
 
+# --- Task Attachments Views ---
+
+@login_required
+@require_POST
+def task_attachment_upload_view(request, pk):
+    task = get_object_or_404(Task, pk=pk)
+    if not can_edit_task(request.user, task):
+        raise PermissionDenied("You do not have permission to attach files to this task.")
+
+    files = request.FILES.getlist('file')
+    if not files:
+        messages.error(request, "No file was selected for upload.")
+        return redirect('task_detail', pk=task.pk)
+
+    uploaded_count = 0
+    for f in files:
+        try:
+            AttachmentService.add_attachment(request.user, task, f)
+            uploaded_count += 1
+        except ValidationError as ve:
+            messages.error(request, f"Failed to upload '{f.name}': {ve}")
+
+    if uploaded_count > 0:
+        messages.success(request, f"Successfully uploaded {uploaded_count} file(s).")
+
+    return redirect('task_detail', pk=task.pk)
+
+
+@login_required
+def task_attachment_download_view(request, task_pk, attachment_pk):
+    task = get_object_or_404(Task, pk=task_pk)
+    if not can_view_task(request.user, task):
+        raise PermissionDenied("You do not have permission to view or download files for this task.")
+
+    attachment = get_object_or_404(TaskAttachment, pk=attachment_pk, task=task)
+    if not attachment.file:
+        raise Http404("Attachment file not found on disk.")
+
+    return FileResponse(attachment.file.open('rb'), as_attachment=True, filename=attachment.filename)
+
+
+@login_required
+@require_POST
+def task_attachment_delete_view(request, task_pk, attachment_pk):
+    task = get_object_or_404(Task, pk=task_pk)
+    try:
+        AttachmentService.delete_attachment(request.user, attachment_pk)
+        messages.success(request, "Attachment was removed.")
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+
+    return redirect('task_detail', pk=task.pk)
+
+
 # --- Teams Views ---
 
 @login_required
@@ -455,6 +536,8 @@ def team_detail_view(request, pk):
     is_admin = can_manage_team(request.user, team)
 
     add_member_form = AddTeamMemberForm() if is_admin else None
+    invitation_form = WorkspaceInvitationForm() if is_admin else None
+    invitations = team.invitations.select_related('inviter', 'invitee_user').order_by('-created_at') if is_admin else []
 
     context = {
         'title': f"Team: {team.name}",
@@ -465,6 +548,8 @@ def team_detail_view(request, pk):
         'user_role': user_role,
         'is_admin': is_admin,
         'add_member_form': add_member_form,
+        'invitation_form': invitation_form,
+        'invitations': invitations,
         'role_choices': TeamRole.choices,
     }
     return render(request, 'teams/detail.html', context)
@@ -569,6 +654,136 @@ def team_remove_member_view(request, pk, membership_id):
         messages.error(request, str(e))
 
     return redirect('team_detail', pk=team.pk)
+
+
+# --- Workspace Invitations Views ---
+
+@login_required
+@require_POST
+def invitation_create_view(request, pk):
+    team = get_object_or_404(Team, pk=pk)
+    form = WorkspaceInvitationForm(request.POST)
+
+    if form.is_valid():
+        email = form.cleaned_data['email']
+        role = form.cleaned_data['role']
+        try:
+            InvitationService.create_invitation(
+                inviter=request.user,
+                team=team,
+                invitee_email=email,
+                role=role
+            )
+            messages.success(request, f"Invitation sent to '{email}' for role {TeamRole(role).label}.")
+        except (ValidationError, PermissionDenied) as e:
+            messages.error(request, str(e))
+    else:
+        for field, errs in form.errors.items():
+            for err in errs:
+                messages.error(request, err)
+
+    return redirect('team_detail', pk=team.pk)
+
+
+@login_required
+@require_POST
+def invitation_accept_view(request, pk):
+    try:
+        membership = InvitationService.accept_invitation(request.user, pk)
+        messages.success(request, f"You have successfully joined '{membership.team.name}' as {membership.get_role_display()}!")
+        return redirect('team_detail', pk=membership.team.pk)
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+        return redirect('dashboard')
+
+
+@login_required
+@require_POST
+def invitation_decline_view(request, pk):
+    try:
+        InvitationService.decline_invitation(request.user, pk)
+        messages.info(request, "Workspace invitation was declined.")
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+
+    return redirect('dashboard')
+
+
+@login_required
+@require_POST
+def invitation_revoke_view(request, pk):
+    invitation = get_object_or_404(WorkspaceInvitation, pk=pk)
+    team_pk = invitation.team_id
+    try:
+        InvitationService.revoke_invitation(request.user, pk)
+        messages.success(request, f"Invitation to '{invitation.invitee_email}' has been revoked.")
+    except (ValidationError, PermissionDenied) as e:
+        messages.error(request, str(e))
+
+    return redirect('team_detail', pk=team_pk)
+
+
+# --- Updates Center Views ---
+
+@login_required
+def updates_center_view(request):
+    # Auto sync upcoming and overdue deadlines
+    NotificationService.check_and_create_deadline_alerts(request.user)
+
+    filter_type = request.GET.get('filter', 'all')
+    notifications_qs = InAppNotification.objects.filter(
+        recipient=request.user
+    ).select_related('actor', 'task', 'team', 'invitation').order_by('-created_at')
+
+    if filter_type == 'unread':
+        notifications_qs = notifications_qs.filter(is_read=False)
+    elif filter_type == 'deadlines':
+        notifications_qs = notifications_qs.filter(category=NotificationCategory.DEADLINE)
+    elif filter_type == 'activity':
+        notifications_qs = notifications_qs.filter(category__in=[
+            NotificationCategory.ASSIGNMENT,
+            NotificationCategory.STATUS,
+            NotificationCategory.INVITATION
+        ])
+
+    paginator = Paginator(notifications_qs, 20)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+
+    unread_count = InAppNotification.objects.filter(recipient=request.user, is_read=False).count()
+    deadlines_count = InAppNotification.objects.filter(recipient=request.user, category=NotificationCategory.DEADLINE, is_read=False).count()
+
+    context = {
+        'title': 'Updates Center',
+        'page_obj': page_obj,
+        'notifications': page_obj.object_list,
+        'filter_type': filter_type,
+        'unread_count': unread_count,
+        'deadlines_count': deadlines_count,
+    }
+    return render(request, 'updates/index.html', context)
+
+
+@login_required
+@require_POST
+def notification_mark_read_view(request, pk):
+    NotificationService.mark_as_read(request.user, pk)
+    next_url = request.POST.get('next') or request.GET.get('next') or reverse_url_or_fallback(request, 'updates_center')
+    return redirect(next_url)
+
+
+@login_required
+@require_POST
+def notification_mark_all_read_view(request):
+    updated = NotificationService.mark_all_as_read(request.user)
+    messages.success(request, f"Marked {updated} notification(s) as read.")
+    return redirect('updates_center')
+
+
+def reverse_url_or_fallback(request, fallback_name):
+    from django.urls import reverse
+    referer = request.META.get('HTTP_REFERER')
+    return referer if referer else reverse(fallback_name)
 
 
 # --- Activity History View ---

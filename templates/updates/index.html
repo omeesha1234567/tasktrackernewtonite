@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Updates Center{% endblock %}
+
+{% block content %}
+<div class="updates-container" style="max-width: 900px; margin: 0 auto;">
+  <!-- Header & Actions -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h2 style="font-size: 1.625rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.02em;">Updates Center</h2>
+      <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem;">
+        Track task assignments, milestone deadlines, status transitions, and workspace invitations.
+      </p>
+    </div>
+
+    {% if unread_count > 0 %}
+    <form method="post" action="{% url 'notification_mark_all_read' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-outline btn-sm" id="btn-mark-all-read" data-loading-text="Marking...">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Mark All as Read ({{ unread_count }})
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  <!-- Filter Tabs -->
+  <div class="card" style="padding: 0.5rem; margin-bottom: 1.5rem;">
+    <div style="display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.25rem;">
+      <a href="{% url 'updates_center' %}?filter=all" class="btn btn-sm {% if filter_type == 'all' %}btn-primary{% else %}btn-secondary{% endif %}" style="text-decoration: none; border-radius: var(--radius-sm);">
+        All Updates
+      </a>
+      <a href="{% url 'updates_center' %}?filter=unread" class="btn btn-sm {% if filter_type == 'unread' %}btn-primary{% else %}btn-secondary{% endif %}" style="text-decoration: none; border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.4rem;">
+        Unread
+        {% if unread_count > 0 %}
+        <span class="badge badge-warning" style="font-size: 0.6875rem; padding: 0.1rem 0.4rem;">{{ unread_count }}</span>
+        {% endif %}
+      </a>
+      <a href="{% url 'updates_center' %}?filter=deadlines" class="btn btn-sm {% if filter_type == 'deadlines' %}btn-primary{% else %}btn-secondary{% endif %}" style="text-decoration: none; border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.4rem;">
+        Deadlines & Overdue
+        {% if deadlines_count > 0 %}
+        <span class="badge badge-priority-urgent" style="font-size: 0.6875rem; padding: 0.1rem 0.4rem;">{{ deadlines_count }}</span>
+        {% endif %}
+      </a>
+      <a href="{% url 'updates_center' %}?filter=activity" class="btn btn-sm {% if filter_type == 'activity' %}btn-primary{% else %}btn-secondary{% endif %}" style="text-decoration: none; border-radius: var(--radius-sm);">
+        Task & Workspace Activity
+      </a>
+    </div>
+  </div>
+
+  <!-- Notifications List -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    {% if notifications %}
+    <div class="updates-list">
+      {% for n in notifications %}
+      <div class="update-item {% if not n.is_read %}unread{% endif %} {% if n.is_urgent %}urgent{% endif %}" style="display: flex; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-light); background-color: {% if not n.is_read %}var(--bg-surface-elevated){% else %}transparent{% endif %}; transition: background-color var(--transition-fast);">
+        
+        <!-- Category Icon -->
+        <div style="flex-shrink: 0; width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; 
+          {% if n.is_urgent %}background-color: var(--danger-light); color: var(--danger);
+          {% elif n.category == 'DEADLINE' %}background-color: rgba(217, 119, 6, 0.12); color: #d97706;
+          {% elif n.category == 'ASSIGNMENT' %}background-color: rgba(61, 101, 83, 0.12); color: var(--accent-sage);
+          {% elif n.category == 'INVITATION' %}background-color: rgba(37, 99, 235, 0.12); color: #2563eb;
+          {% else %}background-color: var(--bg-surface-elevated); color: var(--text-muted);{% endif %}">
+          
+          {% if n.category == 'DEADLINE' %}
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {% elif n.category == 'ASSIGNMENT' %}
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          {% elif n.category == 'INVITATION' %}
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          {% elif n.category == 'STATUS' %}
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {% else %}
+          <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {% endif %}
+        </div>
+
+        <!-- Notification Details -->
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="font-weight: 700; color: var(--text-main); font-size: 0.9375rem;">
+              {{ n.title }}
+            </span>
+            {% if not n.is_read %}
+            <span class="badge badge-info" style="font-size: 0.6875rem;">New</span>
+            {% endif %}
+            {% if n.is_urgent %}
+            <span class="badge badge-priority-urgent" style="font-size: 0.6875rem;">Urgent</span>
+            {% endif %}
+          </div>
+
+          <p style="color: var(--text-muted); font-size: 0.875rem; margin: 0.35rem 0 0.5rem 0; line-height: 1.5;">
+            {{ n.message }}
+          </p>
+
+          <div style="display: flex; align-items: center; gap: 1rem; font-size: 0.75rem; color: var(--text-muted); flex-wrap: wrap;">
+            <span>{{ n.created_at|timesince }} ago</span>
+            
+            {% if n.task %}
+            <span>&bull;</span>
+            <a href="{% url 'task_detail' pk=n.task.pk %}" style="font-weight: 600; color: var(--accent-sage); text-decoration: none;">
+              Task #{{ n.task.id }}: {{ n.task.title|truncatechars:35 }} &rarr;
+            </a>
+            {% elif n.team %}
+            <span>&bull;</span>
+            <a href="{% url 'team_detail' pk=n.team.pk %}" style="font-weight: 600; color: var(--accent-sage); text-decoration: none;">
+              Team: {{ n.team.name }} &rarr;
+            </a>
+            {% endif %}
+
+            {% if n.actor %}
+            <span>&bull;</span>
+            <span>By <strong>{{ n.actor.get_full_name|default:n.actor.username }}</strong></span>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="flex-shrink: 0; display: flex; align-items: center;">
+          {% if not n.is_read %}
+          <form method="post" action="{% url 'notification_mark_read' pk=n.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-outline btn-sm" title="Mark as read" aria-label="Mark notification as read" data-loading-text="...">
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              Mark Read
+            </button>
+          </form>
+          {% else %}
+          <span style="font-size: 0.75rem; color: var(--text-muted); padding: 0.25rem 0.5rem;">Read</span>
+          {% endif %}
+        </div>
+
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Pagination Controls -->
+    {% if page_obj.has_other_pages %}
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; background-color: var(--bg-surface-elevated); border-top: 1px solid var(--border-light);">
+      <div style="font-size: 0.8125rem; color: var(--text-muted);">
+        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+      </div>
+      <div style="display: flex; gap: 0.5rem;">
+        {% if page_obj.has_previous %}
+        <a href="?filter={{ filter_type }}&page={{ page_obj.previous_page_number }}" class="btn btn-outline btn-sm">&larr; Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a href="?filter={{ filter_type }}&page={{ page_obj.next_page_number }}" class="btn btn-outline btn-sm">Next &rarr;</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <!-- Empty State -->
+    <div class="empty-state" style="padding: 3rem 1.5rem;">
+      <svg class="empty-state-icon" width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 1rem auto; color: var(--accent-sage);">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+      </svg>
+      <div class="empty-state-title" style="font-size: 1.1rem;">
+        {% if filter_type == 'unread' %}
+        No Unread Notifications
+        {% elif filter_type == 'deadlines' %}
+        No Deadline Alerts
+        {% elif filter_type == 'activity' %}
+        No Recent Activity Updates
+        {% else %}
+        No Updates Recorded
+        {% endif %}
+      </div>
+      <p class="empty-state-description" style="font-size: 0.875rem; max-width: 420px; margin: 0.5rem auto 0 auto;">
+        {% if filter_type == 'unread' %}
+        You are all caught up! When new tasks are assigned to you or deadlines approach, they will appear here.
+        {% else %}
+        Notifications are automatically published when team members assign tasks, update workflow states, or send workspace invitations.
+        {% endif %}
+      </p>
+      {% if filter_type != 'all' %}
+      <a href="{% url 'updates_center' %}" class="btn btn-outline btn-sm" style="margin-top: 1rem;">View All Updates</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

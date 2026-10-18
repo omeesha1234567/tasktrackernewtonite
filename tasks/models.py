@@ -275,3 +275,176 @@ class IdempotencyRecord(models.Model):
 
     def __str__(self):
         return f"IdempotencyRecord({self.user.username}, {self.key}, {self.action})"
+
+
+class TaskAttachment(models.Model):
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        help_text="Task this file is attached to."
+    )
+    uploader = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_attachments',
+        help_text="User who uploaded the attachment."
+    )
+    file = models.FileField(upload_to='attachments/%Y/%m/')
+    filename = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField(default=0, help_text="File size in bytes.")
+    content_type = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Task Attachment'
+        verbose_name_plural = 'Task Attachments'
+
+    def __str__(self):
+        return f"{self.filename} (#{self.task_id})"
+
+    @property
+    def human_size(self):
+        bytes_val = self.file_size
+        if bytes_val < 1024:
+            return f"{bytes_val} B"
+        elif bytes_val < 1024 * 1024:
+            return f"{bytes_val / 1024:.1f} KB"
+        else:
+            return f"{bytes_val / (1024 * 1024):.1f} MB"
+
+    @property
+    def is_image(self):
+        return self.content_type.startswith('image/') or self.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'))
+
+
+class InvitationStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    ACCEPTED = 'ACCEPTED', 'Accepted'
+    DECLINED = 'DECLINED', 'Declined'
+    REVOKED = 'REVOKED', 'Revoked'
+    EXPIRED = 'EXPIRED', 'Expired'
+
+
+class WorkspaceInvitation(models.Model):
+    team = models.ForeignKey(
+        Team,
+        on_delete=models.CASCADE,
+        related_name='invitations',
+        help_text="Target workspace team."
+    )
+    inviter = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='sent_invitations',
+        help_text="Team Admin or Owner who initiated the invitation."
+    )
+    invitee_email = models.EmailField(help_text="Email of the invited user.")
+    invitee_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='received_invitations',
+        help_text="User account matching the email if one exists."
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=TeamRole.choices,
+        default=TeamRole.MEMBER,
+        help_text="Proposed role for the user upon accepting."
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=InvitationStatus.choices,
+        default=InvitationStatus.PENDING
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(help_text="Deadline for accepting invitation.")
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Workspace Invitation'
+        verbose_name_plural = 'Workspace Invitations'
+
+    def __str__(self):
+        return f"Invite: {self.invitee_email} -> {self.team.name} ({self.get_status_display()})"
+
+    @property
+    def is_expired(self):
+        if self.status != InvitationStatus.PENDING:
+            return False
+        return timezone.now() > self.expires_at
+
+
+class NotificationCategory(models.TextChoices):
+    ASSIGNMENT = 'ASSIGNMENT', 'Task Assignment'
+    DEADLINE = 'DEADLINE', 'Deadline Alert'
+    STATUS = 'STATUS', 'Task Status'
+    INVITATION = 'INVITATION', 'Workspace Invitation'
+    GENERAL = 'GENERAL', 'General Update'
+
+
+class InAppNotification(models.Model):
+    recipient = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='inapp_notifications',
+        help_text="Target recipient of the notification."
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='triggered_notifications',
+        help_text="User whose action triggered the notification (or null if system)."
+    )
+    category = models.CharField(
+        max_length=30,
+        choices=NotificationCategory.choices,
+        default=NotificationCategory.GENERAL
+    )
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notifications'
+    )
+    invitation = models.ForeignKey(
+        WorkspaceInvitation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notifications'
+    )
+    team = models.ForeignKey(
+        Team,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='notifications'
+    )
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    is_urgent = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'In-App Notification'
+        verbose_name_plural = 'In-App Notifications'
+        indexes = [
+            models.Index(fields=['recipient', 'is_read', 'created_at'], name='notif_recip_read_idx'),
+            models.Index(fields=['recipient', 'category'], name='notif_recip_cat_idx'),
+        ]
+
+    def __str__(self):
+        return f"[{self.get_category_display()}] for {self.recipient.username}: {self.title}"
+

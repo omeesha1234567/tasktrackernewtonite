@@ -38,6 +38,11 @@ urlpatterns = [
     path('tasks/<int:pk>/archive/', views.task_archive_view, name='task_archive'),
     path('tasks/<int:pk>/restore/', views.task_restore_view, name='task_restore'),
 
+    # Task Attachments
+    path('tasks/<int:pk>/attachments/upload/', views.task_attachment_upload_view, name='task_attachment_upload'),
+    path('tasks/<int:task_pk>/attachments/<int:attachment_pk>/download/', views.task_attachment_download_view, name='task_attachment_download'),
+    path('tasks/<int:task_pk>/attachments/<int:attachment_pk>/delete/', views.task_attachment_delete_view, name='task_attachment_delete'),
+
     # Teams
     path('teams/', views.team_list_view, name='team_list'),
     path('teams/new/', views.team_create_view, name='team_create'),
@@ -46,6 +51,17 @@ urlpatterns = [
     path('teams/<int:pk>/members/add/', views.team_add_member_view, name='team_add_member'),
     path('teams/<int:pk>/members/<int:membership_id>/role/', views.team_change_role_view, name='team_change_role'),
     path('teams/<int:pk>/members/<int:membership_id>/remove/', views.team_remove_member_view, name='team_remove_member'),
+
+    # Workspace Invitations
+    path('teams/<int:pk>/invitations/create/', views.invitation_create_view, name='invitation_create'),
+    path('invitations/<int:pk>/accept/', views.invitation_accept_view, name='invitation_accept'),
+    path('invitations/<int:pk>/decline/', views.invitation_decline_view, name='invitation_decline'),
+    path('invitations/<int:pk>/revoke/', views.invitation_revoke_view, name='invitation_revoke'),
+
+    # Updates Center
+    path('updates/', views.updates_center_view, name='updates_center'),
+    path('updates/<int:pk>/read/', views.notification_mark_read_view, name='notification_mark_read'),
+    path('updates/read-all/', views.notification_mark_all_read_view, name='notification_mark_all_read'),
 
     # Activity History
     path('activity/', views.activity_list_view, name='activity_list'),

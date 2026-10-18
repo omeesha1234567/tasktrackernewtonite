@@ -208,3 +208,26 @@ class ChangeMemberRoleForm(forms.Form):
         choices=TeamRole.choices,
         widget=forms.Select(attrs={'class': 'form-select'})
     )
+
+
+class TaskAttachmentForm(forms.Form):
+    file = forms.FileField(
+        widget=forms.ClearableFileInput(attrs={'class': 'form-input-file', 'id': 'task-file-upload-input', 'required': True})
+    )
+
+
+class WorkspaceInvitationForm(forms.Form):
+    email = forms.EmailField(
+        label="Invitee Email Address",
+        widget=forms.EmailInput(attrs={
+            'class': 'form-input',
+            'placeholder': 'colleague@company.com',
+            'required': True,
+            'id': 'invite-email-input'
+        })
+    )
+    role = forms.ChoiceField(
+        choices=TeamRole.choices,
+        initial=TeamRole.MEMBER,
+        widget=forms.Select(attrs={'class': 'form-select', 'id': 'invite-role-select'})
+    )

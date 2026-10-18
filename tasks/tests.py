@@ -338,3 +338,281 @@ class DashboardMetricsTests(TaskTrackerBaseTestCase):
         self.assertEqual(data['in_progress_count'], 1)
         self.assertEqual(data['overdue_count'], 1)
         self.assertEqual(data['my_tasks_count'], 1)
+
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from tasks.models import (
+    TaskAttachment,
+    WorkspaceInvitation,
+    InvitationStatus,
+    InAppNotification,
+    NotificationCategory,
+)
+from tasks.services import (
+    AttachmentService,
+    InvitationService,
+    NotificationService,
+)
+
+
+class TaskAttachmentTests(TaskTrackerBaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.task = TaskService.create_task(
+            user=self.alice,
+            team=self.team_alpha,
+            title="Attachment Test Task",
+            status=TaskStatus.OPEN
+        )
+
+    def test_authorized_user_can_upload_attachment(self):
+        sample_file = SimpleUploadedFile("spec.pdf", b"%PDF-1.4 test binary data", content_type="application/pdf")
+        attachment = AttachmentService.add_attachment(
+            user=self.alice,
+            task=self.task,
+            uploaded_file=sample_file
+        )
+        self.assertIsNotNone(attachment.pk)
+        self.assertEqual(attachment.filename, "spec.pdf")
+        self.assertEqual(attachment.file_size, len(b"%PDF-1.4 test binary data"))
+        self.assertEqual(attachment.uploader, self.alice)
+
+    def test_unauthorized_user_cannot_upload_attachment(self):
+        # Eve is not in team_alpha
+        sample_file = SimpleUploadedFile("exploit.txt", b"unauthorized content", content_type="text/plain")
+        with self.assertRaises(PermissionDenied):
+            AttachmentService.add_attachment(
+                user=self.eve,
+                task=self.task,
+                uploaded_file=sample_file
+            )
+
+    def test_file_download_authorization(self):
+        sample_file = SimpleUploadedFile("readme.txt", b"hello world", content_type="text/plain")
+        attachment = AttachmentService.add_attachment(
+            user=self.alice,
+            task=self.task,
+            uploaded_file=sample_file
+        )
+
+        # Team member Alice can download
+        resp_alice = self.client_alice.get(reverse('task_attachment_download', kwargs={'task_pk': self.task.pk, 'attachment_pk': attachment.pk}))
+        self.assertEqual(resp_alice.status_code, 200)
+
+        # Non-member Eve cannot download
+        resp_eve = self.client_eve.get(reverse('task_attachment_download', kwargs={'task_pk': self.task.pk, 'attachment_pk': attachment.pk}))
+        self.assertEqual(resp_eve.status_code, 403)
+
+    def test_delete_attachment_cleans_up_storage(self):
+        sample_file = SimpleUploadedFile("delete_me.txt", b"ephemeral data", content_type="text/plain")
+        attachment = AttachmentService.add_attachment(
+            user=self.alice,
+            task=self.task,
+            uploaded_file=sample_file
+        )
+        att_pk = attachment.pk
+        AttachmentService.delete_attachment(user=self.alice, attachment_id=att_pk)
+        self.assertFalse(TaskAttachment.objects.filter(pk=att_pk).exists())
+
+
+class WorkspaceInvitationTests(TaskTrackerBaseTestCase):
+    def test_admin_can_create_invitation(self):
+        # Alice is Admin in Alpha team
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email="charlie_invite@test.local",
+            role=TeamRole.MANAGER
+        )
+        self.assertEqual(invitation.status, InvitationStatus.PENDING)
+        self.assertEqual(invitation.role, TeamRole.MANAGER)
+
+    def test_non_admin_cannot_create_invitation(self):
+        # Charlie is Member in Alpha team
+        with self.assertRaises(PermissionDenied):
+            InvitationService.create_invitation(
+                inviter=self.charlie,
+                team=self.team_alpha,
+                invitee_email="outsider@test.local",
+                role=TeamRole.MEMBER
+            )
+
+    def test_duplicate_pending_invitation_prevention(self):
+        InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email="duplicate@test.local",
+            role=TeamRole.MEMBER
+        )
+        with self.assertRaises(ValidationError):
+            InvitationService.create_invitation(
+                inviter=self.alice,
+                team=self.team_alpha,
+                invitee_email="duplicate@test.local",
+                role=TeamRole.MEMBER
+            )
+
+    def test_invitee_can_accept_invitation(self):
+        # Invite Eve (currently not in team_alpha)
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email=self.eve.email,
+            role=TeamRole.MANAGER
+        )
+
+        # Eve accepts
+        membership = InvitationService.accept_invitation(self.eve, invitation.pk)
+        self.assertEqual(membership.team, self.team_alpha)
+        self.assertEqual(membership.role, TeamRole.MANAGER)
+        
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, InvitationStatus.ACCEPTED)
+
+    def test_unauthorized_user_cannot_accept_someone_elses_invitation(self):
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email="target_person@test.local",
+            role=TeamRole.MEMBER
+        )
+        # Eve tries to accept an invitation addressed to someone else
+        with self.assertRaises(PermissionDenied):
+            InvitationService.accept_invitation(self.eve, invitation.pk)
+
+    def test_invitee_can_decline_invitation(self):
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email=self.eve.email,
+            role=TeamRole.MEMBER
+        )
+        declined_inv = InvitationService.decline_invitation(self.eve, invitation.pk)
+        self.assertEqual(declined_inv.status, InvitationStatus.DECLINED)
+        self.assertFalse(TeamMembership.objects.filter(user=self.eve, team=self.team_alpha).exists())
+
+    def test_admin_can_revoke_invitation(self):
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email="revoke_target@test.local",
+            role=TeamRole.MEMBER
+        )
+        revoked_inv = InvitationService.revoke_invitation(self.alice, invitation.pk)
+        self.assertEqual(revoked_inv.status, InvitationStatus.REVOKED)
+
+
+class InAppNotificationTests(TaskTrackerBaseTestCase):
+    def test_notification_created_on_task_assignment(self):
+        task = TaskService.create_task(
+            user=self.alice,
+            team=self.team_alpha,
+            title="Design Review",
+            assignee=self.bob,
+            status=TaskStatus.OPEN
+        )
+        # Bob should have received an assignment notification
+        notifications = InAppNotification.objects.filter(recipient=self.bob, task=task)
+        self.assertTrue(notifications.exists())
+        notif = notifications.first()
+        self.assertEqual(notif.category, NotificationCategory.ASSIGNMENT)
+        self.assertFalse(notif.is_read)
+
+    def test_mark_as_read_and_mark_all_read(self):
+        NotificationService.create_notification(
+            recipient=self.bob,
+            category=NotificationCategory.STATUS,
+            title="Status Changed",
+            message="Task #1 status transitioned to In Progress",
+        )
+        NotificationService.create_notification(
+            recipient=self.bob,
+            category=NotificationCategory.DEADLINE,
+            title="Upcoming Deadline",
+            message="Task #2 deadline in 24 hours",
+        )
+
+        self.assertEqual(InAppNotification.objects.filter(recipient=self.bob, is_read=False).count(), 2)
+
+        # Mark all as read
+        NotificationService.mark_all_as_read(self.bob)
+        self.assertEqual(InAppNotification.objects.filter(recipient=self.bob, is_read=False).count(), 0)
+
+    def test_updates_center_view_renders_successfully(self):
+        resp = self.client_bob.get(reverse('updates_center'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Updates Center")
+
+
+class FeatureWorkflowIntegrationTests(TaskTrackerBaseTestCase):
+    def test_dashboard_displays_pending_invitation_banner(self):
+        InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email=self.eve.email,
+            role=TeamRole.MEMBER
+        )
+        resp = self.client_eve.get(reverse('dashboard'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Workspace Invitations")
+        self.assertContains(resp, "Alpha Team")
+        self.assertContains(resp, "Accept")
+        self.assertContains(resp, "Decline")
+
+    def test_task_creation_with_multiple_attachments(self):
+        f1 = SimpleUploadedFile("doc1.txt", b"Content 1", content_type="text/plain")
+        f2 = SimpleUploadedFile("doc2.txt", b"Content 2", content_type="text/plain")
+
+        resp = self.client_alice.post(reverse('task_create'), {
+            'title': 'Task With Attachments',
+            'team': self.team_alpha.pk,
+            'priority': TaskPriority.MEDIUM,
+            'status': TaskStatus.OPEN,
+            'attachments': [f1, f2],
+        })
+        self.assertEqual(resp.status_code, 302)
+        task = Task.objects.get(title='Task With Attachments')
+        self.assertEqual(task.attachments.count(), 2)
+
+    def test_notification_mark_read_view(self):
+        notif = NotificationService.create_notification(
+            recipient=self.bob,
+            category=NotificationCategory.STATUS,
+            title="Notice",
+            message="Test Notice Message"
+        )
+        self.assertFalse(notif.is_read)
+        resp = self.client_bob.post(reverse('notification_mark_read', kwargs={'pk': notif.pk}))
+        self.assertEqual(resp.status_code, 302)
+        notif.refresh_from_db()
+        self.assertTrue(notif.is_read)
+
+    def test_notification_mark_all_read_view(self):
+        NotificationService.create_notification(
+            recipient=self.bob,
+            category=NotificationCategory.STATUS,
+            title="Notice 1",
+            message="Test 1"
+        )
+        NotificationService.create_notification(
+            recipient=self.bob,
+            category=NotificationCategory.DEADLINE,
+            title="Notice 2",
+            message="Test 2"
+        )
+        resp = self.client_bob.post(reverse('notification_mark_all_read'))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(InAppNotification.objects.filter(recipient=self.bob, is_read=False).count(), 0)
+
+    def test_invitation_accept_flow_via_post(self):
+        invitation = InvitationService.create_invitation(
+            inviter=self.alice,
+            team=self.team_alpha,
+            invitee_email=self.eve.email,
+            role=TeamRole.MEMBER
+        )
+        resp = self.client_eve.post(reverse('invitation_accept', kwargs={'pk': invitation.pk}))
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(TeamMembership.objects.filter(user=self.eve, team=self.team_alpha).exists())
+
+

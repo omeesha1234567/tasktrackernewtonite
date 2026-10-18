@@ -3,10 +3,10 @@
 {% block page_title %}Dashboard{% endblock %}
 
 {% block content %}
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+<div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
   <div>
-    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">Workspace Overview</h2>
-    <p style="color: var(--text-muted); font-size: 0.875rem;">Real-time task tracking, team workload, and workflow health metrics.</p>
+    <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.02em;">Workspace Overview</h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem;">Real-time task tracking, team workload, and workflow health metrics.</p>
   </div>
   
   <form method="get" action="{% url 'dashboard' %}" style="display: flex; align-items: center; gap: 0.5rem;">
@@ -22,6 +22,51 @@
   </form>
 </div>
 
+<!-- Pending Workspace Invitations Banner -->
+{% if pending_invitations %}
+<div class="card invitation-card" style="margin-bottom: 1.5rem; border-left: 4px solid var(--accent-sage); background: linear-gradient(to right, var(--bg-surface-elevated), var(--bg-surface));">
+  <div class="card-header" style="padding-bottom: 0.5rem; border-bottom: none;">
+    <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; font-size: 1.1rem; color: var(--text-main);">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--accent-sage);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+      Workspace Invitations ({{ pending_invitations|length }})
+    </h3>
+    <span class="badge badge-info">Action Required</span>
+  </div>
+  <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
+    You have been invited to join the following workspace{{ pending_invitations|length|pluralize }}. Accept to collaborate with team members and access tasks:
+  </p>
+  <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+    {% for invite in pending_invitations %}
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; background-color: var(--bg-surface-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-md); flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <div style="font-weight: 700; color: var(--text-main); font-size: 1.05rem;">
+          {{ invite.team.name }}
+        </div>
+        <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 0.25rem;">
+          Invited by <strong>{{ invite.inviter.get_full_name|default:invite.inviter.username }}</strong> &bull; Proposed Role: <span class="badge badge-role-{{ invite.role|lower }}">{{ invite.get_role_display }}</span> &bull; Sent {{ invite.created_at|timesince }} ago
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <form method="post" action="{% url 'invitation_accept' pk=invite.pk %}" style="display: inline;">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-primary btn-sm" id="accept-invite-{{ invite.pk }}" data-loading-text="Joining...">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Accept
+          </button>
+        </form>
+        <form method="post" action="{% url 'invitation_decline' pk=invite.pk %}" style="display: inline;">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline btn-sm" id="decline-invite-{{ invite.pk }}" data-loading-text="Declining...">
+            Decline
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <!-- KPI Cards -->
 <div class="kpi-grid">
   <div class="kpi-card kpi-primary">
@@ -32,7 +77,7 @@
 
   <div class="kpi-card kpi-open">
     <span class="kpi-label">Open</span>
-    <span class="kpi-value" style="color: #2563eb;">{{ open_count }}</span>
+    <span class="kpi-value" style="color: var(--accent-sage);">{{ open_count }}</span>
     <span class="kpi-subtitle"><a href="{% url 'task_list' %}?status=OPEN{% if selected_team %}&team={{ selected_team.id }}{% endif %}">View Open &rarr;</a></span>
   </div>
 
@@ -60,7 +105,7 @@
     </span>
   </div>
 
-  <div class="kpi-card" style="border-left: 3px solid var(--primary);">
+  <div class="kpi-card" style="border-left: 3px solid var(--accent-sage);">
     <span class="kpi-label">Assigned To Me</span>
     <span class="kpi-value">{{ my_tasks_count }}</span>
     <span class="kpi-subtitle"><a href="{% url 'task_list' %}?my=1">Open tasks for you &rarr;</a></span>
@@ -132,7 +177,7 @@
     {% if overdue_tasks %}
     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
       {% for task in overdue_tasks %}
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background-color: var(--danger-light); border: 1px solid var(--danger-border); border-radius: var(--radius-md);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background-color: var(--danger-light); border: 1px solid var(--danger-border); border-radius: var(--radius-md);">
         <div>
           <a href="{% url 'task_detail' pk=task.pk %}" style="font-weight: 600; color: var(--text-main);">#{{ task.id }} {{ task.title }}</a>
           <div style="font-size: 0.75rem; color: var(--danger-text); margin-top: 0.25rem;">
@@ -193,6 +238,10 @@
 {% block extra_scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+  const textColor = isDark ? '#9db0a6' : '#57675f';
+
   // 1. Status Chart
   const statusCtx = document.getElementById('statusChart');
   if (statusCtx) {
@@ -205,16 +254,16 @@ document.addEventListener('DOMContentLoaded', function () {
         labels: statusData.labels,
         datasets: [{
           data: total > 0 ? statusData.data : [1],
-          backgroundColor: total > 0 ? statusData.colors : ['#e2e8f0'],
+          backgroundColor: total > 0 ? ['#3d6553', '#d97706', '#059669'] : ['#a3b899'],
           borderWidth: 2,
-          borderColor: '#ffffff',
+          borderColor: isDark ? '#141d19' : '#ffffff',
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { family: 'Inter', size: 12 } } },
+          legend: { position: 'bottom', labels: { boxWidth: 12, color: textColor, font: { family: 'Inter', size: 12 } } },
           tooltip: {
             enabled: total > 0,
             callbacks: {
@@ -246,7 +295,7 @@ document.addEventListener('DOMContentLoaded', function () {
         datasets: [{
           label: 'Active Tasks',
           data: prioData.data,
-          backgroundColor: prioData.colors,
+          backgroundColor: ['#64748b', '#2563eb', '#d97706', '#dc2626'],
           borderRadius: 6,
         }]
       },
@@ -254,8 +303,8 @@ document.addEventListener('DOMContentLoaded', function () {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
-          x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+          y: { beginAtZero: true, ticks: { precision: 0, color: textColor, font: { family: 'Inter' } }, grid: { color: gridColor } },
+          x: { grid: { display: false }, ticks: { color: textColor, font: { family: 'Inter' } } }
         },
         plugins: {
           legend: { display: false }
@@ -283,8 +332,8 @@ document.addEventListener('DOMContentLoaded', function () {
           {
             label: 'Tasks Created',
             data: trendData.created,
-            borderColor: '#4f46e5',
-            backgroundColor: 'rgba(79, 70, 229, 0.08)',
+            borderColor: '#3d6553',
+            backgroundColor: 'rgba(61, 101, 83, 0.1)',
             fill: true,
             tension: 0.3,
             borderWidth: 2,
@@ -293,8 +342,8 @@ document.addEventListener('DOMContentLoaded', function () {
           {
             label: 'Tasks Resolved',
             data: trendData.resolved,
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            borderColor: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.1)',
             fill: true,
             tension: 0.3,
             borderWidth: 2,
@@ -306,11 +355,11 @@ document.addEventListener('DOMContentLoaded', function () {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          y: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
-          x: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+          y: { beginAtZero: true, ticks: { precision: 0, color: textColor, font: { family: 'Inter' } }, grid: { color: gridColor } },
+          x: { grid: { display: false }, ticks: { color: textColor, font: { family: 'Inter' } } }
         },
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { family: 'Inter' } } }
+          legend: { position: 'bottom', labels: { boxWidth: 12, color: textColor, font: { family: 'Inter' } } }
         }
       }
     });
@@ -327,7 +376,7 @@ document.addEventListener('DOMContentLoaded', function () {
         datasets: [{
           label: 'Unresolved Tasks',
           data: workloadData.data.length > 0 ? workloadData.data : [0],
-          backgroundColor: '#6366f1',
+          backgroundColor: '#4a7863',
           borderRadius: 6,
         }]
       },
@@ -336,8 +385,8 @@ document.addEventListener('DOMContentLoaded', function () {
         maintainAspectRatio: false,
         indexAxis: 'y',
         scales: {
-          x: { beginAtZero: true, ticks: { precision: 0, font: { family: 'Inter' } }, grid: { color: '#f1f5f9' } },
-          y: { grid: { display: false }, ticks: { font: { family: 'Inter' } } }
+          x: { beginAtZero: true, ticks: { precision: 0, color: textColor, font: { family: 'Inter' } }, grid: { color: gridColor } },
+          y: { grid: { display: false }, ticks: { color: textColor, font: { family: 'Inter' } } }
         },
         plugins: {
           legend: { display: false }

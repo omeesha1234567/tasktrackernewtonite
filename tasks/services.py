@@ -2,6 +2,7 @@ from datetime import timedelta
 from django.db import transaction, IntegrityError
 from django.db.models import Count, Q, F
 from django.utils import timezone
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError, PermissionDenied
 
 from .models import (
@@ -14,6 +15,11 @@ from .models import (
     ActivityEvent,
     EventType,
     IdempotencyRecord,
+    TaskAttachment,
+    WorkspaceInvitation,
+    InvitationStatus,
+    InAppNotification,
+    NotificationCategory,
 )
 from .permissions import (
     can_create_task,
@@ -149,6 +155,19 @@ class TaskService:
                 }
             )
 
+            # Notify assignee if assigned to someone else
+            if task.assignee and task.assignee != user:
+                NotificationService.create_notification(
+                    recipient=task.assignee,
+                    actor=user,
+                    category=NotificationCategory.ASSIGNMENT,
+                    title=f"New Task Assigned: #{task.id}",
+                    message=f"{user.get_full_name() or user.username} assigned you to '{task.title}' in team '{team.name}'.",
+                    task=task,
+                    team=team,
+                    is_urgent=(task.priority == TaskPriority.URGENT)
+                )
+
             return task
 
     @classmethod
@@ -258,6 +277,29 @@ class TaskService:
                 new_state=new_state
             )
 
+            # Notifications on reassignment or status change
+            if assignee and assignee != task.assignee and assignee != user:
+                NotificationService.create_notification(
+                    recipient=assignee,
+                    actor=user,
+                    category=NotificationCategory.ASSIGNMENT,
+                    title=f"Task Assigned: #{task.id}",
+                    message=f"{user.get_full_name() or user.username} assigned you to '{title}'.",
+                    task=task,
+                    team=task.team,
+                    is_urgent=(priority == TaskPriority.URGENT)
+                )
+            if status != task.status and task.assignee and task.assignee != user:
+                NotificationService.create_notification(
+                    recipient=task.assignee,
+                    actor=user,
+                    category=NotificationCategory.STATUS,
+                    title=f"Task #{task.id} Status: {TaskStatus(status).label}",
+                    message=f"{user.get_full_name() or user.username} updated status on '{task.title}' to {TaskStatus(status).label}.",
+                    task=task,
+                    team=task.team,
+                )
+
             # Reload updated task from db
             task.refresh_from_db()
             return task
@@ -304,6 +346,17 @@ class TaskService:
                 previous_state={'status': task.status},
                 new_state={'status': new_status}
             )
+
+            if task.assignee and task.assignee != user:
+                NotificationService.create_notification(
+                    recipient=task.assignee,
+                    actor=user,
+                    category=NotificationCategory.STATUS,
+                    title=f"Task #{task.id} Status: {TaskStatus(new_status).label}",
+                    message=f"{user.get_full_name() or user.username} transitioned '{task.title}' to {TaskStatus(new_status).label}.",
+                    task=task,
+                    team=task.team,
+                )
 
             task.refresh_from_db()
             return task
@@ -575,3 +628,318 @@ class DashboardService:
             'recent_activity': recent_activity,
             'overdue_tasks': overdue_tasks,
         }
+
+
+class NotificationService:
+    @classmethod
+    def create_notification(cls, recipient, category, title, message, actor=None, task=None, invitation=None, team=None, is_urgent=False):
+        return InAppNotification.objects.create(
+            recipient=recipient,
+            actor=actor,
+            category=category,
+            title=title,
+            message=message,
+            task=task,
+            invitation=invitation,
+            team=team,
+            is_urgent=is_urgent
+        )
+
+    @classmethod
+    def mark_as_read(cls, user, notification_id):
+        notification = InAppNotification.objects.filter(pk=notification_id, recipient=user).first()
+        if notification and not notification.is_read:
+            notification.is_read = True
+            notification.read_at = timezone.now()
+            notification.save(update_fields=['is_read', 'read_at'])
+        return notification
+
+    @classmethod
+    def mark_all_as_read(cls, user):
+        return InAppNotification.objects.filter(recipient=user, is_read=False).update(
+            is_read=True,
+            read_at=timezone.now()
+        )
+
+    @classmethod
+    def check_and_create_deadline_alerts(cls, user):
+        """
+        Scans tasks assigned to user that are overdue or due today,
+        and generates InAppNotification alerts if one hasn't been created recently.
+        """
+        today = timezone.localdate()
+        my_tasks = Task.objects.filter(
+            assignee=user,
+            is_archived=False
+        ).exclude(status=TaskStatus.RESOLVED)
+
+        # 1. Overdue alerts
+        for task in my_tasks.filter(due_date__lt=today):
+            recent_alert = InAppNotification.objects.filter(
+                recipient=user,
+                task=task,
+                category=NotificationCategory.DEADLINE,
+                created_at__gte=timezone.now() - timedelta(days=1)
+            ).exists()
+            if not recent_alert:
+                cls.create_notification(
+                    recipient=user,
+                    actor=None,
+                    category=NotificationCategory.DEADLINE,
+                    title=f"Overdue Task: #{task.id} {task.title}",
+                    message=f"Task was due on {task.due_date}. Please resolve or update milestone.",
+                    task=task,
+                    team=task.team,
+                    is_urgent=True
+                )
+
+        # 2. Due today
+        for task in my_tasks.filter(due_date=today):
+            recent_alert = InAppNotification.objects.filter(
+                recipient=user,
+                task=task,
+                category=NotificationCategory.DEADLINE,
+                created_at__gte=timezone.now() - timedelta(days=1)
+            ).exists()
+            if not recent_alert:
+                cls.create_notification(
+                    recipient=user,
+                    actor=None,
+                    category=NotificationCategory.DEADLINE,
+                    title=f"Due Today: #{task.id} {task.title}",
+                    message=f"Target completion deadline is today ({task.due_date}).",
+                    task=task,
+                    team=task.team,
+                    is_urgent=False
+                )
+
+
+class InvitationService:
+    @classmethod
+    def create_invitation(cls, inviter, team, invitee_email, role=TeamRole.MEMBER):
+        if not can_manage_team(inviter, team):
+            raise PermissionDenied("Only Team Admins can invite new members.")
+
+        email_clean = invitee_email.strip().lower()
+
+        # Check if already a member
+        if TeamMembership.objects.filter(team=team, user__email__iexact=email_clean).exists():
+            raise ValidationError(f"A user with email '{email_clean}' is already a member of '{team.name}'.")
+
+        # Check existing pending invitation
+        existing_invite = WorkspaceInvitation.objects.filter(
+            team=team,
+            invitee_email__iexact=email_clean,
+            status=InvitationStatus.PENDING
+        ).first()
+
+        if existing_invite:
+            if existing_invite.is_expired:
+                existing_invite.status = InvitationStatus.EXPIRED
+                existing_invite.save(update_fields=['status'])
+            else:
+                raise ValidationError(f"A pending invitation already exists for '{email_clean}'.")
+
+        # Match existing user if registered
+        matching_user = User.objects.filter(email__iexact=email_clean).first()
+
+        with transaction.atomic():
+            invite = WorkspaceInvitation.objects.create(
+                team=team,
+                inviter=inviter,
+                invitee_email=email_clean,
+                invitee_user=matching_user,
+                role=role,
+                status=InvitationStatus.PENDING,
+                expires_at=timezone.now() + timedelta(days=7)
+            )
+
+            ActivityEvent.objects.create(
+                actor=inviter,
+                team=team,
+                event_type=EventType.MEMBER_ADDED,
+                details=f"Invitation sent to '{email_clean}' for role {TeamRole(role).label} by {inviter.username}.",
+                new_state={'email': email_clean, 'role': role, 'invite_id': invite.id}
+            )
+
+            # In-App Notification if user exists
+            if matching_user:
+                NotificationService.create_notification(
+                    recipient=matching_user,
+                    actor=inviter,
+                    category=NotificationCategory.INVITATION,
+                    title=f"Workspace Invitation: {team.name}",
+                    message=f"{inviter.get_full_name() or inviter.username} invited you to join '{team.name}' as {TeamRole(role).label}.",
+                    invitation=invite,
+                    team=team,
+                    is_urgent=False
+                )
+
+            return invite
+
+    @classmethod
+    def accept_invitation(cls, user, invitation_id):
+        invite = WorkspaceInvitation.objects.select_for_update().filter(pk=invitation_id).first()
+        if not invite:
+            raise ValidationError("Invitation not found.")
+
+        if invite.status != InvitationStatus.PENDING:
+            raise ValidationError(f"This invitation is {invite.get_status_display().lower()} and can no longer be accepted.")
+
+        if invite.is_expired:
+            invite.status = InvitationStatus.EXPIRED
+            invite.save(update_fields=['status'])
+            raise ValidationError("This invitation has expired.")
+
+        # Verify authorized recipient
+        matches_user = (invite.invitee_user_id == user.id)
+        matches_email = bool(user.email and invite.invitee_email.lower() == user.email.lower())
+        if not (matches_user or matches_email):
+            raise PermissionDenied("You are not the designated recipient of this invitation.")
+
+        with transaction.atomic():
+            membership, created = TeamMembership.objects.get_or_create(
+                team=invite.team,
+                user=user,
+                defaults={'role': invite.role}
+            )
+            if not created:
+                membership.role = invite.role
+                membership.save(update_fields=['role'])
+
+            invite.status = InvitationStatus.ACCEPTED
+            invite.invitee_user = user
+            invite.save(update_fields=['status', 'invitee_user'])
+
+            ActivityEvent.objects.create(
+                actor=user,
+                team=invite.team,
+                event_type=EventType.MEMBER_ADDED,
+                details=f"{user.username} accepted invitation and joined '{invite.team.name}' as {TeamRole(invite.role).label}.",
+                new_state={'user': user.username, 'role': invite.role}
+            )
+
+            # Notify inviter
+            NotificationService.create_notification(
+                recipient=invite.inviter,
+                actor=user,
+                category=NotificationCategory.INVITATION,
+                title=f"Invitation Accepted: {invite.team.name}",
+                message=f"{user.get_full_name() or user.username} accepted your invitation to join '{invite.team.name}'.",
+                team=invite.team
+            )
+
+            return membership
+
+    @classmethod
+    def decline_invitation(cls, user, invitation_id):
+        invite = WorkspaceInvitation.objects.filter(pk=invitation_id).first()
+        if not invite:
+            raise ValidationError("Invitation not found.")
+
+        matches_user = (invite.invitee_user_id == user.id)
+        matches_email = bool(user.email and invite.invitee_email.lower() == user.email.lower())
+        if not (matches_user or matches_email):
+            raise PermissionDenied("You are not the designated recipient of this invitation.")
+
+        if invite.status != InvitationStatus.PENDING:
+            raise ValidationError("This invitation is not pending.")
+
+        with transaction.atomic():
+            invite.status = InvitationStatus.DECLINED
+            invite.save(update_fields=['status'])
+
+            ActivityEvent.objects.create(
+                actor=user,
+                team=invite.team,
+                event_type=EventType.MEMBER_REMOVED,
+                details=f"{user.username} declined invitation to join '{invite.team.name}'.",
+                previous_state={'status': InvitationStatus.PENDING},
+                new_state={'status': InvitationStatus.DECLINED}
+            )
+            return invite
+
+    @classmethod
+    def revoke_invitation(cls, actor, invitation_id):
+        invite = WorkspaceInvitation.objects.filter(pk=invitation_id).first()
+        if not invite:
+            raise ValidationError("Invitation not found.")
+
+        if not can_manage_team(actor, invite.team):
+            raise PermissionDenied("Only Team Admins can revoke invitations.")
+
+        with transaction.atomic():
+            invite.status = InvitationStatus.REVOKED
+            invite.save(update_fields=['status'])
+
+            ActivityEvent.objects.create(
+                actor=actor,
+                team=invite.team,
+                event_type=EventType.MEMBER_REMOVED,
+                details=f"Invitation to '{invite.invitee_email}' was revoked by {actor.username}.",
+                new_state={'status': InvitationStatus.REVOKED}
+            )
+            return invite
+
+
+class AttachmentService:
+    @classmethod
+    def add_attachment(cls, user, task, uploaded_file):
+        if not can_edit_task(user, task):
+            raise PermissionDenied("You do not have permission to attach files to this task.")
+
+        # File validation: max size 25MB
+        if uploaded_file.size > 25 * 1024 * 1024:
+            raise ValidationError("File size exceeds 25MB limit.")
+
+        with transaction.atomic():
+            attachment = TaskAttachment.objects.create(
+                task=task,
+                uploader=user,
+                file=uploaded_file,
+                filename=uploaded_file.name,
+                file_size=uploaded_file.size,
+                content_type=getattr(uploaded_file, 'content_type', '')
+            )
+
+            ActivityEvent.objects.create(
+                actor=user,
+                team=task.team,
+                task=task,
+                event_type=EventType.TASK_UPDATED,
+                details=f"File attached: '{attachment.filename}' ({attachment.human_size}) by {user.username}.",
+                new_state={'filename': attachment.filename, 'size': attachment.file_size}
+            )
+
+            return attachment
+
+    @classmethod
+    def delete_attachment(cls, user, attachment_id):
+        attachment = TaskAttachment.objects.filter(pk=attachment_id).select_related('task__team').first()
+        if not attachment:
+            raise ValidationError("Attachment not found.")
+
+        is_owner = (attachment.uploader_id == user.id)
+        can_manage = can_edit_task(user, attachment.task)
+        if not (is_owner or can_manage):
+            raise PermissionDenied("You do not have permission to delete this attachment.")
+
+        with transaction.atomic():
+            filename = attachment.filename
+            task = attachment.task
+            team = task.team
+
+            # Delete physical file from storage
+            if attachment.file:
+                attachment.file.delete(save=False)
+            attachment.delete()
+
+            ActivityEvent.objects.create(
+                actor=user,
+                team=team,
+                task=task,
+                event_type=EventType.TASK_UPDATED,
+                details=f"Attachment removed: '{filename}' by {user.username}.",
+                previous_state={'filename': filename}
+            )
+

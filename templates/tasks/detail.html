@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block page_title %}Task #{{ task.id }}{% endblock %}
+{% block page_title %}Task #{{ task.id }}: {{ task.title }}{% endblock %}
 
 {% block content %}
 <!-- Breadcrumb Header -->
@@ -11,7 +11,7 @@
       <a href="{% url 'team_detail' pk=task.team.id %}">{{ task.team.name }}</a> &rsaquo;
       <span>Task #{{ task.id }}</span>
     </div>
-    <h2 style="font-size: 1.625rem; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem;">
+    <h2 style="font-size: 1.625rem; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem; letter-spacing: -0.02em;">
       {{ task.title }}
       {% if task.is_archived %}
       <span class="badge badge-archived">Archived</span>
@@ -42,11 +42,11 @@
 
 <!-- Main Grid: Task Details & Activity Stream -->
 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start;">
-  <!-- Left Column: Details, Description, Workflow Transitions -->
+  <!-- Left Column: Details, Description, Transitions, Attachments, and Timeline -->
   <div style="display: flex; flex-direction: column; gap: 1.5rem;">
     <!-- Core Information Card -->
     <div class="card">
-      <div style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem;">
+      <div style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap;">
         <span class="badge badge-{{ task.status|lower }}" style="font-size: 0.8125rem; padding: 0.3rem 0.75rem;">
           <span class="badge-dot"></span>
           {{ task.get_status_display }}
@@ -54,21 +54,21 @@
         <span class="badge badge-priority-{{ task.priority|lower }}" style="font-size: 0.8125rem; padding: 0.3rem 0.75rem;">
           Priority: {{ task.get_priority_display }}
         </span>
-        <span class="badge" style="background-color: #f1f5f9; color: var(--text-muted); font-family: monospace;" title="Optimistic concurrency control version">
+        <span class="badge" style="background-color: var(--bg-surface-elevated); color: var(--text-muted); font-family: monospace;" title="Optimistic concurrency control version">
           v{{ task.version }}
         </span>
       </div>
 
-      <h3 style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; margin-bottom: 0.5rem;">
+      <h3 style="font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; margin-bottom: 0.5rem;">
         Description
       </h3>
-      <div style="font-size: 0.9375rem; line-height: 1.6; color: var(--text-main); white-space: pre-wrap; background-color: var(--bg-subtle); padding: 1.25rem; border-radius: var(--radius-md); min-height: 80px;">
+      <div style="font-size: 0.9375rem; line-height: 1.6; color: var(--text-main); white-space: pre-wrap; background-color: var(--bg-surface-elevated); padding: 1.25rem; border-radius: var(--radius-md); min-height: 80px; border: 1px solid var(--border-light);">
         {% if task.description %}{{ task.description }}{% else %}<span style="color: var(--text-subtle); font-style: italic;">No description provided.</span>{% endif %}
       </div>
 
       <!-- Quick Workflow Transitions -->
       {% if can_change_status and not task.is_archived and allowed_transitions %}
-      <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+      <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-light);">
         <span style="font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.625rem;">
           Workflow Status Transitions (Atomic & Concurrency-Protected):
         </span>
@@ -78,13 +78,100 @@
             {% csrf_token %}
             <input type="hidden" name="status" value="{{ t.status }}">
             <input type="hidden" name="version" value="{{ task.version }}">
-            <button type="submit" class="btn btn-sm {% if t.status == 'RESOLVED' %}btn-success{% else %}btn-secondary{% endif %}">
+            <button type="submit" class="btn btn-sm {% if t.status == 'RESOLVED' %}btn-success{% else %}btn-secondary{% endif %}" data-loading-text="Updating...">
               Transition to {{ t.label }} &rarr;
             </button>
           </form>
           {% endfor %}
         </div>
       </div>
+      {% endif %}
+    </div>
+
+    <!-- Task Files & Shared Workspace Attachments -->
+    <div class="card" id="task-attachments-section">
+      <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+          Shared Workspace & Files
+        </h3>
+        <span class="badge badge-info">{{ attachments|length }} Attached</span>
+      </div>
+
+      <!-- Existing Files List -->
+      {% if attachments %}
+      <div class="file-list" style="display: flex; flex-direction: column; gap: 0.625rem; margin-bottom: 1.25rem;">
+        {% for att in attachments %}
+        <div class="file-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background-color: var(--bg-surface-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-md); gap: 1rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0;">
+            <div style="width: 36px; height: 36px; border-radius: var(--radius-sm); background-color: rgba(61, 101, 83, 0.12); color: var(--accent-sage); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              {% if att.is_image %}
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              {% else %}
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              {% endif %}
+            </div>
+            <div style="min-width: 0;">
+              <a href="{% url 'task_attachment_download' task_pk=task.pk attachment_pk=att.pk %}" style="font-weight: 600; color: var(--text-main); text-decoration: none; word-break: break-all;" title="Download {{ att.filename }}">
+                {{ att.filename }}
+              </a>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+                {{ att.human_size }} &bull; Added by <strong>{{ att.uploader.username }}</strong> &bull; {{ att.created_at|date:"M d, Y H:i" }}
+              </div>
+            </div>
+          </div>
+          
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;">
+            <a href="{% url 'task_attachment_download' task_pk=task.pk attachment_pk=att.pk %}" class="btn btn-outline btn-sm" download title="Download file" aria-label="Download {{ att.filename }}">
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Download
+            </a>
+            {% if can_manage_attachments or att.uploader == request.user %}
+            <form method="post" action="{% url 'task_attachment_delete' task_pk=task.pk attachment_pk=att.pk %}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete {{ att.filename|escapejs }}?');">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-danger btn-sm" title="Delete file" aria-label="Delete {{ att.filename }}" data-loading-text="...">
+                &times;
+              </button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state" style="padding: 1.5rem 1rem; margin-bottom: 1rem;">
+        <svg class="empty-state-icon" width="36" height="36" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin: 0 auto 0.75rem auto; color: var(--text-muted);">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+        <div class="empty-state-title" style="font-size: 0.9375rem;">No Files Attached</div>
+        <p class="empty-state-description" style="font-size: 0.8125rem;">Share specifications, design assets, logs, or screenshots with your workspace.</p>
+      </div>
+      {% endif %}
+
+      <!-- File Upload Dropzone Form -->
+      {% if can_manage_attachments and not task.is_archived %}
+      <form method="post" action="{% url 'task_attachment_upload' pk=task.pk %}" enctype="multipart/form-data" id="task-attachment-upload-form" style="border-top: 1px solid var(--border-light); padding-top: 1.25rem;">
+        {% csrf_token %}
+        <div class="dropzone" id="file-dropzone" onclick="document.getElementById('file-upload-input').click()" role="button" tabindex="0" aria-label="Upload files">
+          <svg class="dropzone-icon" width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          <div class="dropzone-title">Drag and drop file here, or <span style="color: var(--accent-sage); font-weight: 600; text-decoration: underline;">browse</span></div>
+          <div class="dropzone-hint">Supports documents, images, and archives up to 25 MB</div>
+          <input type="file" name="file" id="file-upload-input" style="display: none;" required>
+        </div>
+
+        <div id="selected-file-display" style="display: none; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; margin-top: 0.75rem; background: var(--bg-surface-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-md);">
+          <div style="display: flex; align-items: center; gap: 0.5rem; overflow: hidden;">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--accent-sage);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <span id="selected-file-name" style="font-weight: 600; font-size: 0.875rem; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 280px;"></span>
+            <span id="selected-file-size" style="font-size: 0.75rem; color: var(--text-muted);"></span>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm" id="upload-submit-btn" data-loading-text="Uploading...">
+            Upload File
+          </button>
+        </div>
+      </form>
       {% endif %}
     </div>
 
@@ -123,7 +210,7 @@
   <div style="display: flex; flex-direction: column; gap: 1.5rem;">
     <!-- Meta Panel -->
     <div class="card">
-      <h3 class="card-title" style="margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+      <h3 class="card-title" style="margin-bottom: 1rem; border-bottom: 1px solid var(--border-light); padding-bottom: 0.5rem;">
         Task Metadata
       </h3>
 
@@ -157,7 +244,7 @@
         <div>
           <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">DEADLINE / DUE DATE</span>
           {% if task.due_date %}
-            <span style="font-weight: 600; {% if task.is_overdue %}color: var(--urgent);{% endif %}">
+            <span style="font-weight: 600; {% if task.is_overdue %}color: var(--danger);{% endif %}">
               {{ task.due_date|date:"F d, Y" }}
               {% if task.is_overdue %}<span class="badge badge-priority-urgent" style="margin-left: 0.35rem;">Overdue</span>{% endif %}
             </span>
@@ -168,11 +255,11 @@
 
         <div>
           <span style="color: var(--text-muted); display: block; font-size: 0.75rem; font-weight: 600;">OPTIMISTIC LOCK VERSION</span>
-          <span style="font-family: monospace; font-weight: 700; color: var(--primary);">Version {{ task.version }}</span>
+          <span style="font-family: monospace; font-weight: 700; color: var(--accent-sage);">Version {{ task.version }}</span>
           <div style="font-size: 0.6875rem; color: var(--text-subtle); margin-top: 0.125rem;">Guarantees lost-update prevention under concurrent edits.</div>
         </div>
 
-        <div style="border-top: 1px solid var(--border-subtle); padding-top: 0.75rem; font-size: 0.75rem; color: var(--text-subtle); display: flex; flex-direction: column; gap: 0.25rem;">
+        <div style="border-top: 1px solid var(--border-light); padding-top: 0.75rem; font-size: 0.75rem; color: var(--text-subtle); display: flex; flex-direction: column; gap: 0.25rem;">
           <div>Created: {{ task.created_at|date:"M d, Y H:i" }}</div>
           <div>Last Updated: {{ task.updated_at|date:"M d, Y H:i" }}</div>
           {% if task.archived_at %}
@@ -203,7 +290,7 @@
       <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('archive-modal')">Cancel</button>
       <form method="post" action="{% url 'task_archive' pk=task.pk %}">
         {% csrf_token %}
-        <button type="submit" class="btn btn-danger btn-sm">Yes, Archive Task</button>
+        <button type="submit" class="btn btn-danger btn-sm" data-loading-text="Archiving...">Yes, Archive Task</button>
       </form>
     </div>
   </div>
